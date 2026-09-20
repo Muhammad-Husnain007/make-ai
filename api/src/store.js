@@ -25,6 +25,11 @@ const stmts = {
   listProjects: db.prepare('SELECT * FROM projects ORDER BY created_at DESC'),
   insertProject: db.prepare('INSERT INTO projects (id, name, public_key, created_at, notify_email) VALUES (?, ?, ?, ?, ?)'),
   updateProject: db.prepare('UPDATE projects SET name = ?, notify_email = ? WHERE id = ?'),
+  updateClientSettings: db.prepare(`
+    UPDATE projects
+    SET name = ?, notify_email = ?, github_token = ?, github_repo = ?, github_base_branch = ?
+    WHERE id = ?
+  `),
   findIssue: db.prepare('SELECT * FROM issues WHERE project_id = ? AND fingerprint = ?'),
   insertIssue: db.prepare(`
     INSERT INTO issues (id, project_id, fingerprint, title, culprit, type, level, status, count, user_count, first_seen, last_seen)
@@ -104,8 +109,6 @@ export function saveAgentResult(id, { status, summary, solution, prUrl, emailedA
   return stmts.getIssue.get(id);
 }
 
-export const DEFAULT_NOTIFY_EMAIL = 'mh8169951@gmail.com';
-
 export function normalizeNotifyEmail(value) {
   const emails = String(value || '')
     .split(/[,;\s]+/)
@@ -114,8 +117,26 @@ export function normalizeNotifyEmail(value) {
   return [...new Set(emails)].join(', ');
 }
 
+export function serializeProject(project) {
+  if (!project) return null;
+  return {
+    id: project.id,
+    name: project.name,
+    public_key: project.public_key,
+    created_at: project.created_at,
+    notify_email: project.notify_email || '',
+    github_repo: project.github_repo || '',
+    github_base_branch: project.github_base_branch || '',
+    github_connected: Boolean(project.github_token && project.github_repo),
+  };
+}
+
 export function listProjects() {
-  return stmts.listProjects.all();
+  return stmts.listProjects.all().map(serializeProject);
+}
+
+export function listGithubProjects() {
+  return stmts.listProjects.all().filter((project) => project.github_token && project.github_repo);
 }
 
 export function createProject(name, notifyEmail) {
@@ -124,21 +145,56 @@ export function createProject(name, notifyEmail) {
     name: String(name || 'New project').trim().slice(0, 80) || 'New project',
     public_key: `pk_live_${nanoid(18)}`,
     created_at: new Date().toISOString(),
-    notify_email: normalizeNotifyEmail(notifyEmail) || DEFAULT_NOTIFY_EMAIL,
+    notify_email: normalizeNotifyEmail(notifyEmail) || '',
   };
   stmts.insertProject.run(project.id, project.name, project.public_key, project.created_at, project.notify_email);
-  return project;
+  return serializeProject(project);
 }
 
 export function getProject(id) {
   return stmts.projectById.get(id) || null;
 }
 
+export function saveClientSettings(publicKey, input = {}) {
+  const project = stmts.projectByKey.get(publicKey);
+  if (!project) {
+    const err = new Error('Unknown project key');
+    err.statusCode = 401;
+    throw err;
+  }
+  const nextName = input.name ? String(input.name).trim().slice(0, 80) || project.name : project.name;
+  let nextEmail = project.notify_email || '';
+  if (input.notifyEmail != null && String(input.notifyEmail).trim() !== '') {
+    nextEmail = normalizeNotifyEmail(input.notifyEmail);
+    if (!nextEmail) {
+      const err = new Error('Client PR email is invalid. Set PULSE_NOTIFY_EMAIL in the client app.');
+      err.statusCode = 400;
+      throw err;
+    }
+  }
+  const nextToken = input.githubToken != null && String(input.githubToken).trim() !== ''
+    ? String(input.githubToken).trim()
+    : project.github_token || '';
+  const nextRepo = input.githubRepo != null && String(input.githubRepo).trim() !== ''
+    ? String(input.githubRepo).trim()
+    : project.github_repo || '';
+  const nextBranch = input.githubBaseBranch != null && String(input.githubBaseBranch).trim() !== ''
+    ? String(input.githubBaseBranch).trim()
+    : project.github_base_branch || '';
+  if (nextRepo && !nextRepo.includes('/')) {
+    const err = new Error('GITHUB_REPO must be owner/name');
+    err.statusCode = 400;
+    throw err;
+  }
+  stmts.updateClientSettings.run(nextName, nextEmail, nextToken, nextRepo, nextBranch, project.id);
+  return stmts.projectById.get(project.id);
+}
+
 export function updateProject(id, { name, notifyEmail } = {}) {
   const project = stmts.projectById.get(id);
   if (!project) return null;
   const nextName = name != null ? (String(name).trim().slice(0, 80) || project.name) : project.name;
-  let nextEmail = project.notify_email || DEFAULT_NOTIFY_EMAIL;
+  let nextEmail = project.notify_email || '';
   if (notifyEmail != null) {
     nextEmail = normalizeNotifyEmail(notifyEmail);
     if (!nextEmail) {
@@ -148,7 +204,7 @@ export function updateProject(id, { name, notifyEmail } = {}) {
     }
   }
   stmts.updateProject.run(nextName, nextEmail, id);
-  return stmts.projectById.get(id);
+  return serializeProject(stmts.projectById.get(id));
 }
 
 function resolveFinishedFixes() {

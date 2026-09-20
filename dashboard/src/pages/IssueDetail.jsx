@@ -74,7 +74,7 @@ export function IssueDetail() {
             {issue.agent_status === 'running' || running ? 'Finding fix…' : 'Run AI fix'}
           </button>
         </div>
-        <p className="mb-3 text-sm text-zinc-400">{issue.agent_summary || 'New error/fatal issues trigger the agent automatically. It writes a fix, opens a PR, and emails the address saved on this project in Setup.'}</p>
+        <p className="mb-3 text-sm text-zinc-400">{issue.agent_summary || 'New error/fatal issues trigger the agent automatically. It writes a fix on the client GitHub base branch, opens a PR, and emails the address the client registered.'}</p>
         {issue.agent_solution && (
           <pre className="mb-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-3 font-mono text-[12px] text-orange-100/90">{issue.agent_solution}</pre>
         )}

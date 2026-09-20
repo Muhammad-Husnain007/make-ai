@@ -2,11 +2,11 @@ import { Octokit } from '@octokit/rest';
 
 const SOURCE_EXT = /\.(?:js|jsx|ts|tsx|mjs|cjs)$/i;
 
-function createClient() {
-  const token = process.env.GITHUB_TOKEN;
-  const repoFull = process.env.GITHUB_REPO || 'Muhammad-Husnain007/Ask-ai';
-  if (!token) return { ok: false, reason: 'GITHUB_TOKEN missing' };
-  if (!repoFull.includes('/')) return { ok: false, reason: 'GITHUB_REPO must be owner/name' };
+function createClient(github = {}) {
+  const token = String(github.githubToken || github.github_token || '').trim();
+  const repoFull = String(github.githubRepo || github.github_repo || '').trim();
+  if (!token) return { ok: false, reason: 'Client GitHub token missing. Set GITHUB_TOKEN in the client app.' };
+  if (!repoFull.includes('/')) return { ok: false, reason: 'Client GitHub repo missing. Set GITHUB_REPO=owner/name in the client app.' };
   const [owner, repo] = repoFull.split('/');
   return { ok: true, octokit: new Octokit({ auth: token }), owner, repo, repoFull };
 }
@@ -18,12 +18,12 @@ function usableBranch(value) {
     : '';
 }
 
-export async function resolveGithubRepo() {
-  const client = createClient();
+export async function resolveGithubRepo(github = {}) {
+  const client = createClient(github);
   if (!client.ok) return client;
   const { octokit, owner, repo, repoFull } = client;
   const { data: repoData } = await octokit.repos.get({ owner, repo });
-  let base = usableBranch(process.env.GITHUB_BASE_BRANCH) || repoData.default_branch;
+  let base = usableBranch(github.githubBaseBranch || github.github_base_branch) || repoData.default_branch;
   let baseRef;
   try {
     ({ data: baseRef } = await octokit.git.getRef({ owner, repo, ref: `heads/${base}` }));
@@ -110,8 +110,8 @@ async function readGithubFile(target, path) {
   }
 }
 
-export async function gatherGithubContext({ stack, culprit, release, extra, localFiles = [] }) {
-  const target = await resolveGithubRepo();
+export async function gatherGithubContext({ stack, culprit, release, extra, localFiles = [], github } = {}) {
+  const target = await resolveGithubRepo(github);
   if (!target.ok) return { ...target, files: [] };
   const tree = await listSourceFiles(target);
   const hints = extractStackPaths(stack, culprit)
@@ -152,12 +152,12 @@ export async function gatherGithubContext({ stack, culprit, release, extra, loca
   return { ...target, files };
 }
 
-export async function createFixPullRequest({ branch, title, body, files }) {
-  const tokenMissing = createClient();
+export async function createFixPullRequest({ branch, title, body, files, github }) {
+  const tokenMissing = createClient(github);
   if (!tokenMissing.ok) return tokenMissing;
   if (!files?.length) return { ok: false, reason: 'No files to commit' };
 
-  const target = await resolveGithubRepo();
+  const target = await resolveGithubRepo(github);
   if (!target.ok) return target;
   const { octokit, owner, repo, base, baseSha, baseTreeSha } = target;
 
@@ -249,8 +249,8 @@ export async function createFixPullRequest({ branch, title, body, files }) {
   }
 }
 
-export async function listPullStates() {
-  const client = createClient();
+export async function listPullStates(github) {
+  const client = createClient(github);
   if (!client.ok) return [];
   const { octokit, owner, repo } = client;
   const { data } = await octokit.pulls.list({

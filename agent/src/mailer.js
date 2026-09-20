@@ -1,7 +1,5 @@
 import nodemailer from 'nodemailer';
 
-const DEFAULT_NOTIFY_EMAIL = 'mh8169951@gmail.com';
-
 function normalizeNotifyEmail(value) {
   const emails = String(value || '')
     .split(/[,;\s]+/)
@@ -22,27 +20,27 @@ function transporter() {
   });
 }
 
-export function isPrEmailEnabled() {
-  const value = String(process.env.SENDPRVIAEMAIL ?? process.env.SEND_PR_VIA_EMAIL ?? 'true').trim();
-  return !/^(false|0|no|off)$/i.test(value);
+export function isSendEmailEnabled() {
+  return /^(true|1|yes|on)$/i.test(String(process.env.ISENABLEDSENDEMAIL ?? '').trim());
 }
 
 export function resolveNotifyEmail(project, issue) {
-  return normalizeNotifyEmail(
-    project?.notify_email || issue?.notify_email || process.env.MAIL_TO || DEFAULT_NOTIFY_EMAIL,
-  ) || DEFAULT_NOTIFY_EMAIL;
+  return normalizeNotifyEmail(project?.notify_email || issue?.notify_email);
 }
 
 export async function emailFixReport({ issue, event, analysis, prUrl, error, to }) {
-  if (!isPrEmailEnabled()) {
+  if (!isSendEmailEnabled()) {
     return { ok: true, skipped: true, to: '' };
+  }
+  const mailTo = normalizeNotifyEmail(to) || resolveNotifyEmail(null, issue);
+  if (!mailTo) {
+    return { ok: true, skipped: true, to: '', reason: 'Client PR email missing. Set PULSE_NOTIFY_EMAIL in the client app.' };
   }
   const mailer = transporter();
   if (!mailer) {
     return { ok: false, reason: 'SMTP_USER / SMTP_PASS missing' };
   }
-  const mailTo = normalizeNotifyEmail(to) || resolveNotifyEmail(null, issue);
-  const from = process.env.MAIL_FROM || process.env.SMTP_USER || process.env.GMAIL_USER;
+  const from = process.env.SMTP_USER || process.env.GMAIL_USER;
   const subject = prUrl
     ? `[Pulse] Fix PR opened: ${issue.title}`.slice(0, 120)
     : `[Pulse] AI fix ready: ${issue.title}`.slice(0, 120);

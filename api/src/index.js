@@ -4,8 +4,8 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Server } from 'socket.io';
-import { listPullStates, runFixAgent, shouldRunAgent } from '@pulse/agent';
-import { applyPullStates, createProject, getIssue, getProject, ingestEvent, listIssues, listProjects, saveAgentResult, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
+import { isSendEmailEnabled, listPullStates, runFixAgent, shouldRunAgent } from '@pulse/agent';
+import { applyPullStates, createProject, getIssue, getProject, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
 import './db.js';
 
 const PORT = Number(process.env.PORT || 8787);
@@ -55,7 +55,15 @@ async function syncPullStatuses() {
   if (Date.now() - lastPullSync < 20000) return;
   lastPullSync = Date.now();
   try {
-    applyPullStates(await listPullStates());
+    const pulls = [];
+    for (const project of listGithubProjects()) {
+      pulls.push(...await listPullStates({
+        githubToken: project.github_token,
+        githubRepo: project.github_repo,
+        githubBaseBranch: project.github_base_branch,
+      }));
+    }
+    applyPullStates(pulls);
   } catch (error) {
     app.log.warn({ err: error }, 'Unable to refresh pull request statuses');
   }
@@ -66,10 +74,8 @@ app.get('/health', async () => ({
   service: 'pulse-api',
   agent: {
     gemini: Boolean(process.env.GEMINI_API_KEY),
-    github: Boolean(process.env.GITHUB_TOKEN),
     smtp: Boolean(process.env.SMTP_USER || process.env.GMAIL_USER),
-    mailTo: process.env.MAIL_TO || 'mh8169951@gmail.com',
-    sendPrViaEmail: !/^(false|0|no|off)$/i.test(String(process.env.SENDPRVIAEMAIL ?? 'true').trim()),
+    isEnabledSendEmail: isSendEmailEnabled(),
   },
 }));
 
@@ -134,6 +140,21 @@ app.post('/api/issues/:id/agent', async (req, reply) => {
 app.get('/api/stats', async (req) => {
   await syncPullStatuses();
   return { stats: stats(req.query?.projectId) };
+});
+
+app.put('/ingest/:projectKey/settings', async (req, reply) => {
+  try {
+    const project = saveClientSettings(req.params.projectKey, {
+      name: req.body?.name,
+      githubToken: req.body?.githubToken ?? req.body?.github_token,
+      githubRepo: req.body?.githubRepo ?? req.body?.github_repo,
+      githubBaseBranch: req.body?.githubBaseBranch ?? req.body?.github_base_branch,
+      notifyEmail: req.body?.notifyEmail ?? req.body?.notify_email,
+    });
+    return { ok: true, project: serializeProject(project) };
+  } catch (error) {
+    return reply.code(error.statusCode || 400).send({ ok: false, error: error.message });
+  }
 });
 
 app.post('/ingest/:projectKey', {

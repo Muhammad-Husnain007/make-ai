@@ -81,15 +81,10 @@ ensureColumn('issues', 'pr_merged', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('issues', 'pr_closed', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('issues', 'emailed_at', 'TEXT');
 ensureColumn('issues', 'emailed_to', 'TEXT');
-ensureColumn('projects', 'notify_email', "TEXT NOT NULL DEFAULT 'mh8169951@gmail.com'");
-
-db.prepare(`
-  UPDATE projects
-  SET notify_email = 'mh8169951@gmail.com'
-  WHERE notify_email IS NULL
-     OR trim(notify_email) = ''
-     OR notify_email = 'hasnainilyas007@gmail.com'
-`).run();
+ensureColumn('projects', 'notify_email', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('projects', 'github_token', 'TEXT');
+ensureColumn('projects', 'github_repo', 'TEXT');
+ensureColumn('projects', 'github_base_branch', 'TEXT');
 
 const DEMO_KEY = 'pk_live_demo_pulse';
 

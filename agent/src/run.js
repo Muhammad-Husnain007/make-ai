@@ -2,11 +2,7 @@ import path from 'node:path';
 import { analyzeWithGemini } from './gemini.js';
 import { createFixPullRequest, gatherGithubContext } from './github.js';
 import { emailFixReport, resolveNotifyEmail } from './mailer.js';
-import { applyAiFilePatch, applyLocalFiles, fallbackReferenceErrorFix, findLocalParseErrors, findStackLocalFiles } from './source.js';
-
-function repoRoot() {
-  return path.resolve(process.env.REPO_ROOT || path.join(process.cwd(), '..', '..'));
-}
+import { applyAiFilePatch, fallbackReferenceErrorFix } from './source.js';
 
 function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -54,12 +50,21 @@ function requireStore(store) {
   return store;
 }
 
+function clientGithub(project) {
+  return {
+    githubToken: project?.github_token,
+    githubRepo: project?.github_repo,
+    githubBaseBranch: project?.github_base_branch,
+  };
+}
+
 export async function runFixAgent({ issue, event, logger, io, force = false, project = null, store }) {
   const persistence = requireStore(store);
   if (!['error', 'fatal'].includes(issue.level || event.level || 'error')) return null;
   const current = persistence.getIssue(issue.id) || issue;
   const owner = project || persistence.getProject?.(current.project_id);
   const mailTo = resolveNotifyEmail(owner, current);
+  const githubConfig = clientGithub(owner);
   if (!force && current.agent_status === 'running') return current;
   if (!force && current.agent_status === 'done' && current.pr_url) return current;
 
@@ -75,30 +80,17 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
   };
   let prUrl = '';
   let agentError = '';
-  const root = repoRoot();
 
   try {
-    const localFiles = [
-      ...findStackLocalFiles(root, {
-        stack: event.stack,
-        culprit: issue.culprit,
-        extra: event.extra,
-        release: event.release || event.release_name,
-      }),
-      ...findLocalParseErrors(root, {
-        release: event.release || event.release_name,
-        cwd: event.extra?.cwd,
-      }),
-    ].filter((file, index, all) => all.findIndex((item) => item.path === file.path) === index);
     const github = await gatherGithubContext({
       stack: event.stack,
       culprit: issue.culprit,
       release: event.release || event.release_name,
       extra: event.extra,
-      localFiles,
+      github: githubConfig,
     });
     if (!github.ok) {
-      agentError = github.reason || 'GitHub repo is not available';
+      agentError = github.reason || 'Client GitHub is not connected';
     } else if (!github.files.length) {
       agentError = 'Could not match this stack to client source files.';
     } else {
@@ -127,9 +119,9 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
       let files = selectPatchedFiles(analysis.files, github.files);
       if (!files.length) files = fallbackReferenceErrorFix(issue, github.files);
       if (files.length) {
-        applyLocalFiles(root, files);
         const prName = fixedIssueName(issue.title);
         const pr = await createFixPullRequest({
+          github: githubConfig,
           branch: prName,
           title: prName,
           body: [
@@ -148,7 +140,7 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
         else if (pr.unchanged) {
           analysis.solution = [
             analysis.solution,
-            'Local crashing file was patched. GitHub base already has the same code, so no new PR diff was created.',
+            'GitHub base already has the same code, so no new PR diff was created.',
           ].filter(Boolean).join('\n\n');
         } else agentError = pr.reason || 'GitHub PR failed';
       } else {
