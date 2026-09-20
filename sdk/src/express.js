@@ -24,6 +24,8 @@ function wrapErrorMiddleware(fn) {
       });
     };
 
+    if (httpStatus >= 500) reportIfServerError();
+
     res.status = (code) => {
       httpStatus = Number(code) || httpStatus;
       return originalStatus(code);

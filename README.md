@@ -29,10 +29,9 @@ Pulse `.env` only needs SaaS keys:
 GEMINI_API_KEY=your_gemini_api_key
 SMTP_USER=you@gmail.com
 SMTP_PASS=your_app_password
-ISENABLEDSENDEMAIL=true
 ```
 
-`ISENABLEDSENDEMAIL=true` sends the PR email. `false` skips sending. The inbox still comes from the client.
+Pulse sends mail with those SMTP credentials. Whether a client wants PR emails is `ISENABLEDSENDEMAIL` in **that client app**, not in Pulse.
 
 ## Install Pulse in a client app
 
@@ -50,6 +49,7 @@ PULSE_NOTIFY_EMAIL=alerts@company.com
 GITHUB_TOKEN=ghp_your_token
 GITHUB_REPO=owner/repo
 GITHUB_BASE_BRANCH=main
+ISENABLEDSENDEMAIL=true
 ```
 
 ```json
@@ -60,7 +60,7 @@ GITHUB_BASE_BRANCH=main
 }
 ```
 
-On startup the SDK tells Pulse the repo, base branch, and PR email. No route changes in the client.
+On startup the SDK tells Pulse the repo, base branch, PR email, and whether to send that email. No route changes in the client.
 
 Production uses the same key with your Pulse host:
 

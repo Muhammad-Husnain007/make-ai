@@ -2,7 +2,7 @@ import path from 'node:path';
 import { analyzeWithGemini } from './gemini.js';
 import { createFixPullRequest, gatherGithubContext } from './github.js';
 import { emailFixReport, resolveNotifyEmail } from './mailer.js';
-import { applyAiFilePatch, fallbackReferenceErrorFix } from './source.js';
+import { applyAiFilePatch, fallbackIssueFix, githubAlreadyHasFix } from './source.js';
 
 function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -31,13 +31,14 @@ function selectPatchedFiles(aiFiles, contextFiles) {
     if (!target) continue;
     const context = allowed.get(target);
     const localPatched = applyAiFilePatch(context.contents, file);
-    if (!localPatched) continue;
     const githubPatched = applyAiFilePatch(context.githubContents || context.contents, file);
+    const nextLocal = localPatched || (githubPatched && context.contents === (context.githubContents || context.contents) ? githubPatched : null);
+    if (!nextLocal && !githubPatched) continue;
     if (out.some((item) => item.path === target)) continue;
     out.push({
       path: target,
-      contents: localPatched,
-      githubContents: githubPatched || context.githubContents || localPatched,
+      contents: nextLocal || context.contents,
+      githubContents: githubPatched || nextLocal || context.githubContents || context.contents,
     });
   }
   return out;
@@ -117,11 +118,12 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
       }
 
       let files = selectPatchedFiles(analysis.files, github.files);
-      if (!files.length) files = fallbackReferenceErrorFix(issue, github.files);
+      if (!files.length) files = fallbackIssueFix(issue, github.files, analysis);
       if (files.length) {
         const prName = fixedIssueName(issue.title);
         const pr = await createFixPullRequest({
           github: githubConfig,
+          target: github,
           branch: prName,
           title: prName,
           body: [
@@ -143,6 +145,12 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
             'GitHub base already has the same code, so no new PR diff was created.',
           ].filter(Boolean).join('\n\n');
         } else agentError = pr.reason || 'GitHub PR failed';
+      } else if (githubAlreadyHasFix(issue, github.files, analysis)) {
+        agentError = '';
+        analysis.solution = [
+          analysis.solution,
+          'GitHub base already has the same code, so no new PR diff was created.',
+        ].filter(Boolean).join('\n\n');
       } else {
         agentError = agentError || 'AI did not return a safe patch against the client source files.';
       }
@@ -162,6 +170,7 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
       prUrl,
       error: agentError,
       to: mailTo,
+      project: owner,
     });
     if (mailed.ok && !mailed.skipped) {
       emailedAt = new Date().toISOString();

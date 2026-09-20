@@ -13,23 +13,40 @@ export function IssuesPage({ refreshKey, view = 'open' }) {
   const [issues, setIssues] = useState(null);
   const [stats, setStats] = useState(null);
   const [q, setQ] = useState('');
+  const [qDebounced, setQDebounced] = useState('');
   const [loadError, setLoadError] = useState('');
   const currentView = DROPDOWN_VIEWS.find((item) => item.id === view) || ISSUE_VIEWS[0];
 
   useEffect(() => {
+    const timer = setTimeout(() => setQDebounced(q), 250);
+    return () => clearTimeout(timer);
+  }, [q]);
+
+  useEffect(() => {
     let cancelled = false;
-    const load = () => {
-      getIssues({ status: view, q })
-        .then((data) => { if (!cancelled) setIssues(data.issues || []); })
-        .catch((error) => { if (!cancelled) { setIssues([]); setLoadError(error.message); } });
-      getStats()
-        .then((data) => { if (!cancelled) setStats(data.stats); })
-        .catch(() => { if (!cancelled) setStats(null); });
-    };
-    load();
-    const timer = setInterval(load, 4000);
-    return () => { cancelled = true; clearInterval(timer); };
-  }, [view, q, refreshKey]);
+    Promise.all([
+      getIssues({ status: view, q: qDebounced }),
+      getStats(),
+    ]).then(([issueData, statsData]) => {
+      if (cancelled) return;
+      setIssues(issueData.issues || []);
+      setStats(statsData.stats);
+      setLoadError('');
+    }).catch((error) => {
+      if (cancelled) return;
+      setIssues([]);
+      setLoadError(error.message);
+    });
+    return () => { cancelled = true; };
+  }, [view, qDebounced, refreshKey]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      getIssues({ status: view, q: qDebounced }).then((data) => setIssues(data.issues || [])).catch(() => {});
+      getStats().then((data) => setStats(data.stats)).catch(() => {});
+    }, 15000);
+    return () => clearInterval(timer);
+  }, [view, qDebounced]);
 
   const chartData = useMemo(() => (stats?.series || []).map((row) => ({
     hour: row.hour.slice(11, 16),

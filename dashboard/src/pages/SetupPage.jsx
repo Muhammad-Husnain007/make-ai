@@ -30,6 +30,7 @@ PULSE_NOTIFY_EMAIL=alerts@company.com
 GITHUB_TOKEN=ghp_your_token
 GITHUB_REPO=owner/repo
 GITHUB_BASE_BRANCH=main
+ISENABLEDSENDEMAIL=true
 
 # package.json
 "start": "node --import @pulse/sdk/register src/server.js"`;
@@ -58,7 +59,7 @@ GITHUB_BASE_BRANCH=main
         <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
           <div>
             <h2 className="text-sm font-semibold">Projects</h2>
-            <p className="mt-1 text-xs text-zinc-500">Repo, branch, and PR inbox come from the client SDK on startup — Pulse does not own those keys.</p>
+            <p className="mt-1 text-xs text-zinc-500">Repo, branch, PR inbox, and email-on/off come from the client SDK on startup — Pulse does not own those keys.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <input value={name} onChange={(e) => setName(e.target.value)} placeholder="Project name" className="h-9 min-w-[180px] rounded-lg border border-white/10 bg-ink-800 px-3 text-sm" />
@@ -96,6 +97,7 @@ GITHUB_BASE_BRANCH=main
                 <div>GitHub: {project.github_connected ? project.github_repo : 'not connected by client'}</div>
                 <div>Base branch: {project.github_base_branch || '—'}</div>
                 <div>PR email: {project.notify_email || '—'}</div>
+                <div>Send PR email: {project.send_email_enabled ? 'on' : 'off'}</div>
               </div>
               <div className="mt-2 break-all font-mono text-[11px] text-zinc-500">{`${origin}/ingest/${project.public_key}`}</div>
             </button>

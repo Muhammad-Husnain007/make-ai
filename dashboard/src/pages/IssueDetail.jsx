@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Bot, Mail } from 'lucide-react';
+import { Bot, GitPullRequest, Mail } from 'lucide-react';
 import { getIssue, patchIssue, runIssueAgent } from '../lib/api.js';
 import { timeAgo } from '../lib/time.js';
+import { usePulseLive } from '../hooks/usePulseLive.js';
 import { AgentPill } from '../components/AgentPill.jsx';
 import { Badge } from '../components/Badge.jsx';
 import { Meta } from '../components/Meta.jsx';
@@ -17,11 +18,19 @@ export function IssueDetail() {
 
   const load = () => getIssue(id).then((data) => setIssue(data.issue)).catch(() => setIssue(null));
   useEffect(() => { load(); }, [id]);
-  useEffect(() => {
-    if (!issue || issue.agent_status !== 'running') return undefined;
-    const timer = setInterval(load, 2500);
-    return () => clearInterval(timer);
-  }, [id, issue?.agent_status]);
+  usePulseLive((payload) => {
+    const next = payload?.issue;
+    if (!next || next.id !== id) return;
+    setIssue((current) => {
+      if (!current) return next;
+      return {
+        ...current,
+        ...next,
+        events: next.events?.length ? next.events : current.events,
+        hourly: next.hourly || current.hourly,
+      };
+    });
+  });
 
   if (!issue) return <div className="p-8 text-zinc-500">Loading issue…</div>;
   const latest = issue.events?.[0];
@@ -55,6 +64,19 @@ export function IssueDetail() {
         <Meta label="Last seen" value={timeAgo(issue.last_seen)} />
       </div>
 
+      <section className="mb-5 rounded-2xl border border-emerald-400/20 bg-emerald-500/5 p-5">
+        <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold"><GitPullRequest size={16} /> Pull request</h2>
+        {issue.pr_url ? (
+          <PullLink url={issue.pr_url} className="font-mono text-sm" />
+        ) : (
+          <p className="text-sm text-zinc-500">
+            {issue.agent_status === 'running'
+              ? 'AI is opening a pull request…'
+              : 'No pull request yet. The GitHub PR URL appears here as soon as the agent opens one.'}
+          </p>
+        )}
+      </section>
+
       <section className="mb-5 rounded-2xl border border-orange-400/20 bg-orange-500/5 p-5">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h2 className="flex items-center gap-2 text-sm font-semibold"><Bot size={16} /> AI agent</h2>
@@ -63,8 +85,15 @@ export function IssueDetail() {
             onClick={async () => {
               setRunning(true);
               try {
-                await runIssueAgent(issue.id);
-                await load();
+                const data = await runIssueAgent(issue.id);
+                if (data?.issue) {
+                  setIssue((current) => ({
+                    ...current,
+                    ...data.issue,
+                    events: current.events,
+                    hourly: current.hourly,
+                  }));
+                }
               } finally {
                 setRunning(false);
               }
@@ -96,6 +125,7 @@ export function IssueDetail() {
         <section className="space-y-5">
           <div className="rounded-2xl border border-white/8 bg-ink-900 p-5 text-sm">
             <h2 className="mb-3 text-sm font-semibold">Context</h2>
+            <Row k="Pull request" v={issue.pr_url ? <PullLink url={issue.pr_url} className="text-xs" /> : null} />
             <Row k="URL" v={latest?.url} />
             <Row k="Environment" v={latest?.environment} />
             <Row k="Release" v={latest?.release} />

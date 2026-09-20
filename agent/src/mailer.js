@@ -20,17 +20,20 @@ function transporter() {
   });
 }
 
-export function isSendEmailEnabled() {
-  return /^(true|1|yes|on)$/i.test(String(process.env.ISENABLEDSENDEMAIL ?? '').trim());
+export function isSendEmailEnabled(project) {
+  const raw = project?.send_email_enabled;
+  if (raw === 1 || raw === true) return true;
+  if (raw === 0 || raw === false || raw == null) return false;
+  return /^(true|1|yes|on)$/i.test(String(raw).trim());
 }
 
 export function resolveNotifyEmail(project, issue) {
   return normalizeNotifyEmail(project?.notify_email || issue?.notify_email);
 }
 
-export async function emailFixReport({ issue, event, analysis, prUrl, error, to }) {
-  if (!isSendEmailEnabled()) {
-    return { ok: true, skipped: true, to: '' };
+export async function emailFixReport({ issue, event, analysis, prUrl, error, to, project }) {
+  if (!isSendEmailEnabled(project)) {
+    return { ok: true, skipped: true, to: '', reason: 'Client email sending is off. Set ISENABLEDSENDEMAIL=true in the client app.' };
   }
   const mailTo = normalizeNotifyEmail(to) || resolveNotifyEmail(null, issue);
   if (!mailTo) {

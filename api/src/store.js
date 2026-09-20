@@ -27,7 +27,7 @@ const stmts = {
   updateProject: db.prepare('UPDATE projects SET name = ?, notify_email = ? WHERE id = ?'),
   updateClientSettings: db.prepare(`
     UPDATE projects
-    SET name = ?, notify_email = ?, github_token = ?, github_repo = ?, github_base_branch = ?
+    SET name = ?, notify_email = ?, github_token = ?, github_repo = ?, github_base_branch = ?, send_email_enabled = ?
     WHERE id = ?
   `),
   findIssue: db.prepare('SELECT * FROM issues WHERE project_id = ? AND fingerprint = ?'),
@@ -117,6 +117,21 @@ export function normalizeNotifyEmail(value) {
   return [...new Set(emails)].join(', ');
 }
 
+export function parseBoolFlag(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  if (/^(true|1|yes|on)$/i.test(raw)) return true;
+  if (/^(false|0|no|off)$/i.test(raw)) return false;
+  return null;
+}
+
+export function normalizeGithubRepo(value) {
+  const raw = String(value || '').trim().replace(/\.git$/i, '');
+  const hosted = raw.match(/github\.com[:/]+([^/]+)\/([^/#?]+)/i);
+  if (hosted) return `${hosted[1]}/${hosted[2]}`;
+  return raw.replace(/^\/+|\/+$/g, '');
+}
+
 export function serializeProject(project) {
   if (!project) return null;
   return {
@@ -128,6 +143,7 @@ export function serializeProject(project) {
     github_repo: project.github_repo || '',
     github_base_branch: project.github_base_branch || '',
     github_connected: Boolean(project.github_token && project.github_repo),
+    send_email_enabled: Boolean(project.send_email_enabled),
   };
 }
 
@@ -175,18 +191,23 @@ export function saveClientSettings(publicKey, input = {}) {
   const nextToken = input.githubToken != null && String(input.githubToken).trim() !== ''
     ? String(input.githubToken).trim()
     : project.github_token || '';
-  const nextRepo = input.githubRepo != null && String(input.githubRepo).trim() !== ''
-    ? String(input.githubRepo).trim()
-    : project.github_repo || '';
+  const nextRepo = normalizeGithubRepo(
+    input.githubRepo != null && String(input.githubRepo).trim() !== ''
+      ? input.githubRepo
+      : project.github_repo || '',
+  );
   const nextBranch = input.githubBaseBranch != null && String(input.githubBaseBranch).trim() !== ''
     ? String(input.githubBaseBranch).trim()
     : project.github_base_branch || '';
   if (nextRepo && !nextRepo.includes('/')) {
-    const err = new Error('GITHUB_REPO must be owner/name');
+    const err = new Error('GITHUB_REPO must be owner/name or a github.com URL');
     err.statusCode = 400;
     throw err;
   }
-  stmts.updateClientSettings.run(nextName, nextEmail, nextToken, nextRepo, nextBranch, project.id);
+  let nextSend = project.send_email_enabled ? 1 : 0;
+  const parsedSend = parseBoolFlag(input.isEnabledSendEmail ?? input.sendEmailEnabled ?? input.send_email_enabled);
+  if (parsedSend != null) nextSend = parsedSend ? 1 : 0;
+  stmts.updateClientSettings.run(nextName, nextEmail, nextToken, nextRepo, nextBranch, nextSend, project.id);
   return stmts.projectById.get(project.id);
 }
 

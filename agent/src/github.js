@@ -2,9 +2,16 @@ import { Octokit } from '@octokit/rest';
 
 const SOURCE_EXT = /\.(?:js|jsx|ts|tsx|mjs|cjs)$/i;
 
+function normalizeGithubRepo(value) {
+  const raw = String(value || '').trim().replace(/\.git$/i, '');
+  const hosted = raw.match(/github\.com[:/]+([^/]+)\/([^/#?]+)/i);
+  if (hosted) return `${hosted[1]}/${hosted[2]}`;
+  return raw.replace(/^\/+|\/+$/g, '');
+}
+
 function createClient(github = {}) {
   const token = String(github.githubToken || github.github_token || '').trim();
-  const repoFull = String(github.githubRepo || github.github_repo || '').trim();
+  const repoFull = normalizeGithubRepo(github.githubRepo || github.github_repo);
   if (!token) return { ok: false, reason: 'Client GitHub token missing. Set GITHUB_TOKEN in the client app.' };
   if (!repoFull.includes('/')) return { ok: false, reason: 'Client GitHub repo missing. Set GITHUB_REPO=owner/name in the client app.' };
   const [owner, repo] = repoFull.split('/');
@@ -18,12 +25,18 @@ function usableBranch(value) {
     : '';
 }
 
+const repoCache = new Map();
+
 export async function resolveGithubRepo(github = {}) {
   const client = createClient(github);
   if (!client.ok) return client;
+  const requested = usableBranch(github.githubBaseBranch || github.github_base_branch);
+  const cacheKey = `${client.repoFull}:${requested}:${String(github.githubToken || github.github_token || '').slice(-8)}`;
+  const cached = repoCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 45000) return cached.value;
   const { octokit, owner, repo, repoFull } = client;
   const { data: repoData } = await octokit.repos.get({ owner, repo });
-  let base = usableBranch(github.githubBaseBranch || github.github_base_branch) || repoData.default_branch;
+  let base = requested || repoData.default_branch;
   let baseRef;
   try {
     ({ data: baseRef } = await octokit.git.getRef({ owner, repo, ref: `heads/${base}` }));
@@ -37,7 +50,7 @@ export async function resolveGithubRepo(github = {}) {
     repo,
     commit_sha: baseRef.object.sha,
   });
-  return {
+  const value = {
     ok: true,
     octokit,
     owner,
@@ -47,6 +60,8 @@ export async function resolveGithubRepo(github = {}) {
     baseSha: baseRef.object.sha,
     baseTreeSha: commit.tree.sha,
   };
+  repoCache.set(cacheKey, { at: Date.now(), value });
+  return value;
 }
 
 export function extractStackPaths(stack, culprit = '') {
@@ -90,12 +105,20 @@ async function listSourceFiles(target) {
   });
   return (data.tree || [])
     .filter((item) => item.type === 'blob' && SOURCE_EXT.test(item.path || ''))
-    .map((item) => item.path)
-    .filter((path) => !path.includes('node_modules/') && !path.startsWith('pulse/incidents/'));
+    .filter((item) => !item.path.includes('node_modules/') && !item.path.startsWith('pulse/incidents/'))
+    .map((item) => ({ path: item.path, sha: item.sha }));
 }
 
-async function readGithubFile(target, path) {
+async function readGithubFile(target, path, sha) {
   try {
+    if (sha) {
+      const { data } = await target.octokit.git.getBlob({
+        owner: target.owner,
+        repo: target.repo,
+        file_sha: sha,
+      });
+      if (data?.content) return Buffer.from(String(data.content).replace(/\n/g, ''), 'base64').toString('utf8');
+    }
     const { data } = await target.octokit.repos.getContent({
       owner: target.owner,
       repo: target.repo,
@@ -114,6 +137,7 @@ export async function gatherGithubContext({ stack, culprit, release, extra, loca
   const target = await resolveGithubRepo(github);
   if (!target.ok) return { ...target, files: [] };
   const tree = await listSourceFiles(target);
+  const byPath = new Map(tree.map((item) => [item.path, item]));
   const hints = extractStackPaths(stack, culprit)
     .filter((hint) => !hint.startsWith('node:') && !hint.includes('internal/modules/'));
   const shopScoped = hints.some((hint) => /shop-api/i.test(hint))
@@ -122,7 +146,7 @@ export async function gatherGithubContext({ stack, culprit, release, extra, loca
   const matched = [];
   for (const hint of hints) {
     const ranked = tree
-      .map((path) => ({ path, score: scoreRepoPath(hint, path) }))
+      .map((item) => ({ path: item.path, score: scoreRepoPath(hint, item.path) }))
       .filter((item) => item.score > 0)
       .sort((a, b) => b.score - a.score);
     const hit = ranked.find((item) => !shopScoped || !item.path.startsWith('pulse/')) || ranked[0];
@@ -130,36 +154,31 @@ export async function gatherGithubContext({ stack, culprit, release, extra, loca
     if (matched.length >= 4) break;
   }
   for (const local of localFiles) {
-    if (local.path && !matched.includes(local.path) && tree.includes(local.path)) {
-      matched.push(local.path);
-    } else if (local.path && !matched.includes(local.path)) {
-      matched.push(local.path);
-    }
+    if (local.path && !matched.includes(local.path)) matched.push(local.path);
   }
-  const files = [];
-  for (const filePath of matched) {
+  const files = (await Promise.all(matched.map(async (filePath) => {
     const local = localFiles.find((item) => item.path === filePath);
-    const githubContents = await readGithubFile(target, filePath);
+    const githubContents = await readGithubFile(target, filePath, byPath.get(filePath)?.sha);
     const contents = local?.contents || githubContents;
-    if (!contents) continue;
-    files.push({
+    if (!contents) return null;
+    return {
       path: filePath,
       contents,
       githubContents: githubContents || contents,
       fromLocal: Boolean(local),
-    });
-  }
+    };
+  }))).filter(Boolean);
   return { ...target, files };
 }
 
-export async function createFixPullRequest({ branch, title, body, files, github }) {
+export async function createFixPullRequest({ branch, title, body, files, github, target }) {
   const tokenMissing = createClient(github);
   if (!tokenMissing.ok) return tokenMissing;
   if (!files?.length) return { ok: false, reason: 'No files to commit' };
 
-  const target = await resolveGithubRepo(github);
-  if (!target.ok) return target;
-  const { octokit, owner, repo, base, baseSha, baseTreeSha } = target;
+  const resolved = target?.ok ? target : await resolveGithubRepo(github);
+  if (!resolved.ok) return resolved;
+  const { octokit, owner, repo, base, baseSha, baseTreeSha } = resolved;
 
   const blobs = [];
   for (const file of files) {

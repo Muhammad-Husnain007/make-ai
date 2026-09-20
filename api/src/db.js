@@ -85,6 +85,7 @@ ensureColumn('projects', 'notify_email', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('projects', 'github_token', 'TEXT');
 ensureColumn('projects', 'github_repo', 'TEXT');
 ensureColumn('projects', 'github_base_branch', 'TEXT');
+ensureColumn('projects', 'send_email_enabled', 'INTEGER NOT NULL DEFAULT 0');
 
 const DEMO_KEY = 'pk_live_demo_pulse';
 

@@ -117,8 +117,15 @@ export function createPulseClient(options = {}) {
       githubRepo: process.env.GITHUB_REPO || '',
       githubBaseBranch: process.env.GITHUB_BASE_BRANCH || '',
       notifyEmail: process.env.PULSE_NOTIFY_EMAIL || '',
+      isEnabledSendEmail: process.env.ISENABLEDSENDEMAIL ?? '',
     };
-    if (!payload.githubToken && !payload.githubRepo && !payload.githubBaseBranch && !payload.notifyEmail) return;
+    if (
+      !payload.githubToken
+      && !payload.githubRepo
+      && !payload.githubBaseBranch
+      && !payload.notifyEmail
+      && payload.isEnabledSendEmail === ''
+    ) return;
     fetch(`${parsed.origin}/ingest/${key}/settings`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },

@@ -4,7 +4,7 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Server } from 'socket.io';
-import { isSendEmailEnabled, listPullStates, runFixAgent, shouldRunAgent } from '@pulse/agent';
+import { listPullStates, runFixAgent, shouldRunAgent } from '@pulse/agent';
 import { applyPullStates, createProject, getIssue, getProject, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
 import './db.js';
 
@@ -75,7 +75,6 @@ app.get('/health', async () => ({
   agent: {
     gemini: Boolean(process.env.GEMINI_API_KEY),
     smtp: Boolean(process.env.SMTP_USER || process.env.GMAIL_USER),
-    isEnabledSendEmail: isSendEmailEnabled(),
   },
 }));
 
@@ -105,7 +104,7 @@ app.patch('/api/projects/:id', async (req, reply) => {
 });
 
 app.get('/api/issues', async (req) => {
-  await syncPullStatuses();
+  syncPullStatuses().catch(() => {});
   const { projectId, status, environment, q, limit } = req.query || {};
   return { issues: listIssues({ projectId, status, environment, q, limit }) };
 });
@@ -138,7 +137,7 @@ app.post('/api/issues/:id/agent', async (req, reply) => {
 });
 
 app.get('/api/stats', async (req) => {
-  await syncPullStatuses();
+  syncPullStatuses().catch(() => {});
   return { stats: stats(req.query?.projectId) };
 });
 
@@ -150,6 +149,7 @@ app.put('/ingest/:projectKey/settings', async (req, reply) => {
       githubRepo: req.body?.githubRepo ?? req.body?.github_repo,
       githubBaseBranch: req.body?.githubBaseBranch ?? req.body?.github_base_branch,
       notifyEmail: req.body?.notifyEmail ?? req.body?.notify_email,
+      isEnabledSendEmail: req.body?.isEnabledSendEmail ?? req.body?.ISENABLEDSENDEMAIL ?? req.body?.send_email_enabled,
     });
     return { ok: true, project: serializeProject(project) };
   } catch (error) {
@@ -192,8 +192,17 @@ const start = async () => {
   io.on('connection', (socket) => {
     socket.emit('pulse:hello', { ok: true, ts: Date.now() });
   });
-  await app.listen({ port: PORT, host: HOST });
-  app.log.info(`Pulse API http://${HOST}:${PORT}`);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    try {
+      await app.listen({ port: PORT, host: HOST });
+      app.log.info(`Pulse API http://${HOST}:${PORT}`);
+      return;
+    } catch (error) {
+      const busy = error.code === 'EADDRINUSE' || /EADDRINUSE/.test(error.message || '');
+      if (!busy || attempt === 7) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 400));
+    }
+  }
 };
 
 start().catch((error) => {
