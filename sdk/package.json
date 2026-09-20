@@ -1,0 +1,24 @@
+{
+  "name": "@pulse/sdk",
+  "version": "1.0.0",
+  "description": "Pulse error monitoring SDK. Install, set PULSE_DSN, start your app.",
+  "type": "module",
+  "main": "src/index.js",
+  "module": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./register": "./src/register.js",
+    "./express": "./src/express.js"
+  },
+  "files": [
+    "src"
+  ],
+  "peerDependencies": {
+    "express": ">=4"
+  },
+  "peerDependenciesMeta": {
+    "express": {
+      "optional": true
+    }
+  }
+}
