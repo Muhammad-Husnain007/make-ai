@@ -64,6 +64,75 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
   CREATE INDEX IF NOT EXISTS idx_events_issue_time ON events(issue_id, timestamp DESC);
   CREATE INDEX IF NOT EXISTS idx_events_project_time ON events(project_id, timestamp DESC);
+
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT NOT NULL UNIQUE,
+    password_hash TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS sessions (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
+
+  CREATE TABLE IF NOT EXISTS companies (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS company_members (
+    company_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    role TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (company_id, user_id),
+    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE TABLE IF NOT EXISTS invitations (
+    id TEXT PRIMARY KEY,
+    token TEXT NOT NULL UNIQUE,
+    kind TEXT NOT NULL,
+    email TEXT NOT NULL,
+    company_name TEXT,
+    company_id TEXT,
+    invited_by TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
+    FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_invites_email ON invitations(email, status);
+  CREATE INDEX IF NOT EXISTS idx_members_user ON company_members(user_id);
+
+  CREATE TABLE IF NOT EXISTS register_otps (
+    email TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    otp_hash TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS reset_otps (
+    email TEXT PRIMARY KEY,
+    otp_hash TEXT NOT NULL,
+    verified INTEGER NOT NULL DEFAULT 0,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 
 function ensureColumn(table, name, definition) {
@@ -86,6 +155,12 @@ ensureColumn('projects', 'github_token', 'TEXT');
 ensureColumn('projects', 'github_repo', 'TEXT');
 ensureColumn('projects', 'github_base_branch', 'TEXT');
 ensureColumn('projects', 'send_email_enabled', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('projects', 'company_id', 'TEXT');
+ensureColumn('invitations', 'can_invite', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('invitations', 'company_address', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('company_members', 'can_invite', 'INTEGER NOT NULL DEFAULT 0');
+ensureColumn('companies', 'address', "TEXT NOT NULL DEFAULT ''");
+ensureColumn('companies', 'paused', 'INTEGER NOT NULL DEFAULT 0');
 
 const DEMO_KEY = 'pk_live_demo_pulse';
 

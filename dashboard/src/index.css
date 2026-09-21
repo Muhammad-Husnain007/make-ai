@@ -2,6 +2,14 @@
 @tailwind components;
 @tailwind utilities;
 
+@keyframes auth-from-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.auth-from-right {
+  animation: auth-from-right 0.5s ease-out;
+}
+
 html, body, #root { min-height: 100%; }
 body { background: #070709; }
 

@@ -133,13 +133,13 @@ async function readGithubFile(target, path, sha) {
   }
 }
 
-export async function gatherGithubContext({ stack, culprit, release, extra, localFiles = [], github } = {}) {
+export async function gatherGithubContext({ stack, culprit, release, extra, url, localFiles = [], github } = {}) {
   const target = await resolveGithubRepo(github);
   if (!target.ok) return { ...target, files: [] };
   const tree = await listSourceFiles(target);
   const byPath = new Map(tree.map((item) => [item.path, item]));
-  const hints = extractStackPaths(stack, culprit)
-    .filter((hint) => !hint.startsWith('node:') && !hint.includes('internal/modules/'));
+  const hints = extractStackPaths(stack, [culprit, url, extra?.main, extra?.cwd].filter(Boolean).join('\n'))
+    .filter((hint) => !hint.startsWith('node:') && !hint.includes('internal/modules/') && !hint.includes('/node:'));
   const shopScoped = hints.some((hint) => /shop-api/i.test(hint))
     || /shop-api/i.test(String(release || ''))
     || /shop-api/i.test(String(extra?.cwd || ''));
@@ -147,7 +147,7 @@ export async function gatherGithubContext({ stack, culprit, release, extra, loca
   for (const hint of hints) {
     const ranked = tree
       .map((item) => ({ path: item.path, score: scoreRepoPath(hint, item.path) }))
-      .filter((item) => item.score > 0)
+      .filter((item) => item.score >= 60)
       .sort((a, b) => b.score - a.score);
     const hit = ranked.find((item) => !shopScoped || !item.path.startsWith('pulse/')) || ranked[0];
     if (hit && !matched.includes(hit.path)) matched.push(hit.path);
@@ -168,7 +168,12 @@ export async function gatherGithubContext({ stack, culprit, release, extra, loca
       fromLocal: Boolean(local),
     };
   }))).filter(Boolean);
-  return { ...target, files };
+  const unmatchedReason = files.length
+    ? ''
+    : (!hints.length
+      ? 'This stack has no client file paths — only Node internals — so Pulse cannot open a PR against the GitHub repo.'
+      : `This stack points at ${hints.join(', ')}, which are not files in ${target.repoFull}.`);
+  return { ...target, files, unmatchedReason };
 }
 
 export async function createFixPullRequest({ branch, title, body, files, github, target }) {

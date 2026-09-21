@@ -37,7 +37,7 @@ export function IssueDetail() {
 
   return (
     <div className="p-8">
-      <button onClick={() => navigate('/')} className="mb-5 text-sm text-zinc-500 hover:text-white">← All issues</button>
+      <button onClick={() => navigate('/open')} className="mb-5 text-sm text-zinc-500 hover:text-white">← All issues</button>
       <div className="mb-6 flex items-start justify-between gap-4">
         <div>
           <div className="mb-2 flex items-center gap-2"><Badge level={issue.level} /><AgentPill status={issue.agent_status} /><span className="text-xs text-zinc-500">{issue.status}</span></div>
@@ -57,8 +57,7 @@ export function IssueDetail() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-4 gap-3 text-sm">
-        <Meta label="Events" value={issue.count} />
+      <div className="mb-6 grid grid-cols-3 gap-3 text-sm">
         <Meta label="Users" value={issue.user_count} />
         <Meta label="First seen" value={timeAgo(issue.first_seen)} />
         <Meta label="Last seen" value={timeAgo(issue.last_seen)} />

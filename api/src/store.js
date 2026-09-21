@@ -23,7 +23,7 @@ const stmts = {
   projectByKey: db.prepare('SELECT * FROM projects WHERE public_key = ?'),
   projectById: db.prepare('SELECT * FROM projects WHERE id = ?'),
   listProjects: db.prepare('SELECT * FROM projects ORDER BY created_at DESC'),
-  insertProject: db.prepare('INSERT INTO projects (id, name, public_key, created_at, notify_email) VALUES (?, ?, ?, ?, ?)'),
+  insertProject: db.prepare('INSERT INTO projects (id, name, public_key, created_at, notify_email, company_id) VALUES (?, ?, ?, ?, ?, ?)'),
   updateProject: db.prepare('UPDATE projects SET name = ?, notify_email = ? WHERE id = ?'),
   updateClientSettings: db.prepare(`
     UPDATE projects
@@ -144,31 +144,43 @@ export function serializeProject(project) {
     github_base_branch: project.github_base_branch || '',
     github_connected: Boolean(project.github_token && project.github_repo),
     send_email_enabled: Boolean(project.send_email_enabled),
+    company_id: project.company_id || null,
   };
 }
 
-export function listProjects() {
-  return stmts.listProjects.all().map(serializeProject);
+export function listProjects(scope = { all: true }) {
+  if (scope.all) return stmts.listProjects.all().map(serializeProject);
+  if (!scope.projectIds?.length) return [];
+  return db.prepare(`
+    SELECT * FROM projects
+    WHERE id IN (${scope.projectIds.map(() => '?').join(',')})
+    ORDER BY created_at DESC
+  `).all(...scope.projectIds).map(serializeProject);
 }
 
 export function listGithubProjects() {
   return stmts.listProjects.all().filter((project) => project.github_token && project.github_repo);
 }
 
-export function createProject(name, notifyEmail) {
+export function createProject(name, notifyEmail, companyId = null) {
   const project = {
     id: nanoid(),
     name: String(name || 'New project').trim().slice(0, 80) || 'New project',
     public_key: `pk_live_${nanoid(18)}`,
     created_at: new Date().toISOString(),
     notify_email: normalizeNotifyEmail(notifyEmail) || '',
+    company_id: companyId || null,
   };
-  stmts.insertProject.run(project.id, project.name, project.public_key, project.created_at, project.notify_email);
+  stmts.insertProject.run(project.id, project.name, project.public_key, project.created_at, project.notify_email, project.company_id);
   return serializeProject(project);
 }
 
 export function getProject(id) {
   return stmts.projectById.get(id) || null;
+}
+
+export function getProjectByKey(publicKey) {
+  return stmts.projectByKey.get(publicKey) || null;
 }
 
 export function saveClientSettings(publicKey, input = {}) {
@@ -270,13 +282,17 @@ export function applyPullStates(pulls = []) {
   `).run();
 }
 
-export function listIssues({ projectId, status, environment, q, limit = 80 } = {}) {
+export function listIssues({ projectId, projectIds, status, environment, q, limit = 80 } = {}) {
   resolveFinishedFixes();
   const clauses = [];
   const params = [];
   if (projectId) {
     clauses.push('i.project_id = ?');
     params.push(projectId);
+  } else if (projectIds) {
+    if (!projectIds.length) return [];
+    clauses.push(`i.project_id IN (${projectIds.map(() => '?').join(',')})`);
+    params.push(...projectIds);
   }
   if (status === 'fixed' || status === 'resolved') {
     clauses.push("i.agent_status = 'done' AND i.pr_url IS NOT NULL AND trim(i.pr_url) != ''");
@@ -289,6 +305,16 @@ export function listIssues({ projectId, status, environment, q, limit = 80 } = {
   } else if (status === 'open') {
     clauses.push("i.status = 'open'");
     clauses.push("NOT (i.agent_status = 'done' AND i.pr_url IS NOT NULL AND trim(i.pr_url) != '')");
+  } else if (status === 'performance') {
+    clauses.push(`(
+      lower(i.title) LIKE '%timeout%' OR lower(i.title) LIKE '%slow%' OR lower(i.title) LIKE '%latency%'
+      OR lower(i.title) LIKE '%performance%' OR lower(i.culprit) LIKE '%timeout%'
+    )`);
+  } else if (status === 'memory-leak') {
+    clauses.push(`(
+      lower(i.title) LIKE '%memory%' OR lower(i.title) LIKE '%heap%' OR lower(i.title) LIKE '%leak%'
+      OR lower(i.title) LIKE '%oom%'
+    )`);
   } else if (status && status !== 'all') {
     clauses.push('i.status = ?');
     params.push(status);
@@ -332,13 +358,38 @@ export function setIssueStatus(id, status) {
   return stmts.getIssue.get(id);
 }
 
-export function stats(projectId) {
+export function stats(projectId, projectIds) {
   resolveFinishedFixes();
+  if (projectIds && !projectIds.length) {
+    return {
+      openIssues: 0,
+      fixedIssues: 0,
+      createPull: 0,
+      mergePull: 0,
+      closedPull: 0,
+      events24h: 0,
+      users24h: 0,
+      series: [],
+      byLevel: [],
+    };
+  }
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const issueFilter = projectId ? 'AND project_id = ?' : '';
-  const params = projectId ? [since, projectId] : [since];
-  const scope = projectId ? 'AND project_id = ?' : '';
-  const scopeParams = projectId ? [projectId] : [];
+  let scope = '';
+  let eventScope = '';
+  let scopeParams = [];
+  let eventParams = [since];
+  if (projectId) {
+    scope = 'AND project_id = ?';
+    eventScope = 'AND project_id = ?';
+    scopeParams = [projectId];
+    eventParams = [since, projectId];
+  } else if (projectIds) {
+    const holes = projectIds.map(() => '?').join(',');
+    scope = `AND project_id IN (${holes})`;
+    eventScope = `AND project_id IN (${holes})`;
+    scopeParams = projectIds;
+    eventParams = [since, ...projectIds];
+  }
   const open = db.prepare(`
     SELECT COUNT(*) AS n FROM issues
     WHERE status = 'open'
@@ -355,27 +406,27 @@ export function stats(projectId) {
   `).get(...scopeParams);
   const mergePull = db.prepare(`SELECT COUNT(*) AS n FROM issues WHERE pr_merged = 1 ${scope}`).get(...scopeParams);
   const closedPull = db.prepare(`SELECT COUNT(*) AS n FROM issues WHERE IFNULL(pr_closed, 0) = 1 ${scope}`).get(...scopeParams);
-  const events24h = db.prepare(`SELECT COUNT(*) AS n FROM events WHERE timestamp >= ? ${issueFilter}`).get(...params);
+  const events24h = db.prepare(`SELECT COUNT(*) AS n FROM events WHERE timestamp >= ? ${eventScope}`).get(...eventParams);
   const users24h = db.prepare(`
     SELECT COUNT(DISTINCT json_extract(user_json, '$.id')) AS n
     FROM events
-    WHERE timestamp >= ? AND json_extract(user_json, '$.id') IS NOT NULL ${issueFilter}
-  `).get(...params);
+    WHERE timestamp >= ? AND json_extract(user_json, '$.id') IS NOT NULL ${eventScope}
+  `).get(...eventParams);
   const series = db.prepare(`
     SELECT strftime('%Y-%m-%dT%H:00:00.000Z', timestamp) AS hour, COUNT(*) AS count
     FROM events
-    WHERE timestamp >= ? ${issueFilter}
+    WHERE timestamp >= ? ${eventScope}
     GROUP BY hour
     ORDER BY hour
-  `).all(...params);
+  `).all(...eventParams);
   const byLevel = db.prepare(`
     SELECT level, COUNT(*) AS count
     FROM issues
     WHERE status = 'open'
       AND NOT (agent_status = 'done' AND pr_url IS NOT NULL AND trim(pr_url) != '')
-      ${projectId ? 'AND project_id = ?' : ''}
+      ${scope}
     GROUP BY level
-  `).all(...(projectId ? [projectId] : []));
+  `).all(...scopeParams);
   return {
     openIssues: open.n,
     fixedIssues: fixed.n,

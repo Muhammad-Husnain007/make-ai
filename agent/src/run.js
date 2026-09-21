@@ -59,6 +59,12 @@ function clientGithub(project) {
   };
 }
 
+function emitIssue(io, issue, project) {
+  if (!io) return;
+  io.to('platform').emit('pulse:issue', issue);
+  if (project?.company_id) io.to(`company:${project.company_id}`).emit('pulse:issue', issue);
+}
+
 export async function runFixAgent({ issue, event, logger, io, force = false, project = null, store }) {
   const persistence = requireStore(store);
   if (!['error', 'fatal'].includes(issue.level || event.level || 'error')) return null;
@@ -70,7 +76,7 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
   if (!force && current.agent_status === 'done' && current.pr_url) return current;
 
   persistence.setAgentStatus(issue.id, 'running');
-  io?.emit('pulse:issue', { ...current, agent_status: 'running' });
+  emitIssue(io, { ...current, agent_status: 'running' }, owner);
 
   let analysis = {
     summary: '',
@@ -88,12 +94,13 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
       culprit: issue.culprit,
       release: event.release || event.release_name,
       extra: event.extra,
+      url: event.url,
       github: githubConfig,
     });
     if (!github.ok) {
       agentError = github.reason || 'Client GitHub is not connected';
     } else if (!github.files.length) {
-      agentError = 'Could not match this stack to client source files.';
+      agentError = github.unmatchedReason || 'Could not match this stack to client source files.';
     } else {
       try {
         analysis = {
@@ -188,7 +195,7 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
     emailedAt,
     emailedTo,
   });
-  io?.emit('pulse:issue', saved);
+  emitIssue(io, saved, owner);
   return saved;
 }
 

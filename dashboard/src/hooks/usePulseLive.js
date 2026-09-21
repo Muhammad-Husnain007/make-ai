@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
+import { getToken } from '../lib/session.js';
 
 const REALTIME_URL = import.meta.env.VITE_API_ORIGIN || 'http://127.0.0.1:8787';
 
@@ -10,9 +11,11 @@ export function usePulseLive(onEvent) {
     const socket = io(REALTIME_URL, {
       path: '/realtime',
       transports: ['websocket', 'polling'],
+      auth: { token: getToken() },
     });
     socket.on('pulse:event', (payload) => callback.current(payload));
     socket.on('pulse:issue', (issue) => callback.current({ issue }));
+    socket.on('pulse:settings', (project) => callback.current({ project }));
     return () => socket.disconnect();
   }, []);
 }
