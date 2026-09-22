@@ -4,10 +4,11 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Server } from 'socket.io';
-import { listPullStates, runFixAgent, shouldRunAgent } from '@pulse/agent';
-import { applyPullStates, createProject, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
+import { listPullStates, presentIssue, shouldRunAgent } from '@pulse/agent';
+import { applyPullStates, createAdminNotification, createProject, getAgentPipeline, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentPipeline, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
 import { getUserByToken, loginUser, logoutToken, readBearerToken, registerUser, requestRegisterOtp, requestResetOtp, resetPassword, verifyRegisterOtp, verifyResetOtp } from './auth.js';
-import { acceptInvite, adminOverview, canAccessProject, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, listAdminCompanies, listTeam, resendInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
+import { acceptInvite, adminOverview, canAccessProject, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, isPlatformOwner, listAdminCompanies, listAdminNotifications, listTeam, markAdminNotificationRead, markAllAdminNotificationsRead, resendInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
+import { enqueueScan, getQueueDashboard, isQueueEnabled, queueHealth, registerQueueBoard, startQueue } from './queue.js';
 import './db.js';
 
 const PORT = Number(process.env.PORT || 8787);
@@ -24,6 +25,7 @@ await app.register(helmet, { contentSecurityPolicy: false });
 await app.register(rateLimit, {
   max: 180,
   timeWindow: '1 minute',
+  allowList: (req) => String(req.url || '').startsWith('/queues'),
 });
 app.decorateRequest('user', null);
 
@@ -35,10 +37,28 @@ app.addContentTypeParser('text/plain', { parseAs: 'string' }, (req, body, done) 
   }
 });
 
-const agentStore = { getIssue, getProject, saveAgentResult, setAgentStatus };
+const agentStore = { getIssue, getProject, saveAgentResult, setAgentStatus, saveAgentPipeline, getAgentPipeline, createAdminNotification };
 
 function dashboardOrigin(req) {
   return process.env.DASHBOARD_URL || req.headers.origin || 'http://127.0.0.1:5173';
+}
+
+function cookieValue(req, name) {
+  const raw = String(req.headers.cookie || '');
+  for (const part of raw.split(';')) {
+    const [key, ...rest] = part.trim().split('=');
+    if (key === name) return decodeURIComponent(rest.join('=') || '');
+  }
+  return '';
+}
+
+async function requireQueueAdmin(req, reply) {
+  const token = readBearerToken(req) || cookieValue(req, 'pulse_auth');
+  const user = getUserByToken(token);
+  if (!user || !isPlatformOwner(user.email)) {
+    return reply.code(401).send({ error: 'Sign in required' });
+  }
+  req.user = user;
 }
 
 function projectFilter(user, projectId) {
@@ -49,26 +69,27 @@ function projectFilter(user, projectId) {
   return { projectIds: ids };
 }
 
+function presentForUser(user, issue) {
+  return presentIssue(issue, { admin: isPlatformOwner(user?.email) });
+}
+
 function emitToProject(project, event, payload) {
   for (const room of roomsForProject(project)) {
     app.io?.to(room).emit(event, payload);
   }
 }
 
+function emitIssueRooms(project, issue) {
+  app.io?.to('platform').emit('pulse:issue', presentIssue(issue, { admin: true }));
+  if (project?.company_id) {
+    app.io.to(`company:${project.company_id}`).emit('pulse:issue', presentIssue(issue, { admin: false }));
+  }
+}
+
 function queueAgent(issue, event, force = false, project = null) {
   if (isCompanyPaused(project?.company_id)) return;
-  setImmediate(() => {
-    runFixAgent({
-      issue,
-      event,
-      logger: app.log,
-      io: app.io,
-      force,
-      project,
-      store: agentStore,
-    }).catch((error) => {
-      app.log.error({ err: error }, 'Pulse AI agent failed');
-    });
+  enqueueScan({ issue, event, force, project }).catch((error) => {
+    app.log.error({ err: error }, 'Pulse AI agent failed');
   });
 }
 
@@ -100,6 +121,10 @@ app.addHook('preHandler', async (req, reply) => {
   if (!user) return reply.code(401).send({ error: 'Sign in required' });
   req.user = user;
 });
+
+if (isQueueEnabled()) {
+  registerQueueBoard(app, { authenticate: requireQueueAdmin });
+}
 
 const authLimit = { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } };
 
@@ -182,6 +207,30 @@ app.post('/api/invites/:token/accept', async (req, reply) => {
 
 app.get('/api/team', async (req) => listTeam(req.user));
 
+app.get('/api/admin/notifications', async (req, reply) => {
+  try {
+    return listAdminNotifications(req.user, { companyId: req.query?.companyId });
+  } catch (error) {
+    return reply.code(error.statusCode || 400).send({ error: error.message });
+  }
+});
+
+app.post('/api/admin/notifications/read-all', async (req, reply) => {
+  try {
+    return markAllAdminNotificationsRead(req.user);
+  } catch (error) {
+    return reply.code(error.statusCode || 400).send({ error: error.message });
+  }
+});
+
+app.patch('/api/admin/notifications/:id', async (req, reply) => {
+  try {
+    return markAdminNotificationRead(req.user, req.params.id);
+  } catch (error) {
+    return reply.code(error.statusCode || 400).send({ error: error.message });
+  }
+});
+
 app.get('/api/admin/overview', async (req, reply) => {
   try {
     return adminOverview(req.user);
@@ -260,7 +309,13 @@ app.get('/health', async () => ({
     gemini: Boolean(process.env.GEMINI_API_KEY),
     smtp: Boolean(process.env.SMTP_USER || process.env.GMAIL_USER),
   },
+  queue: queueHealth(),
 }));
+
+app.get('/api/queues', async (req, reply) => {
+  if (!isPlatformOwner(req.user?.email)) return reply.code(403).send({ error: 'Only the Pulse owner can view jobs.' });
+  return getQueueDashboard();
+});
 
 app.get('/api/projects', async (req) => ({ projects: listProjects(scopeFromUser(req.user)) }));
 
@@ -290,13 +345,14 @@ app.patch('/api/projects/:id', async (req, reply) => {
 app.get('/api/issues', async (req) => {
   syncPullStatuses().catch(() => {});
   const { projectId, status, environment, q, limit } = req.query || {};
-  return { issues: listIssues({ ...projectFilter(req.user, projectId), status, environment, q, limit }) };
+  const issues = listIssues({ ...projectFilter(req.user, projectId), status, environment, q, limit });
+  return { issues: issues.map((issue) => presentForUser(req.user, issue)) };
 });
 
 app.get('/api/issues/:id', async (req, reply) => {
   const issue = getIssue(req.params.id);
   if (!issue || !canAccessProject(req.user, issue.project_id)) return reply.code(404).send({ error: 'Issue not found' });
-  return { issue };
+  return { issue: presentForUser(req.user, issue) };
 });
 
 app.patch('/api/issues/:id', async (req, reply) => {
@@ -304,8 +360,8 @@ app.patch('/api/issues/:id', async (req, reply) => {
   if (!current || !canAccessProject(req.user, current.project_id)) return reply.code(404).send({ error: 'Issue not found' });
   const issue = setIssueStatus(req.params.id, req.body?.status);
   if (!issue) return reply.code(400).send({ error: 'Unable to update issue' });
-  emitToProject(getProject(issue.project_id), 'pulse:issue', issue);
-  return { issue };
+  emitIssueRooms(getProject(issue.project_id), issue);
+  return { issue: presentForUser(req.user, issue) };
 });
 
 app.post('/api/issues/:id/agent', async (req, reply) => {
@@ -321,7 +377,7 @@ app.post('/api/issues/:id/agent', async (req, reply) => {
     message: issue.title,
   };
   queueAgent(issue, event, true, getProject(issue.project_id));
-  return { ok: true, queued: true, issue: { ...issue, agent_status: 'running' } };
+  return { ok: true, queued: true, issue: presentForUser(req.user, { ...issue, agent_status: 'running' }) };
 });
 
 app.get('/api/stats', async (req) => {
@@ -392,6 +448,7 @@ const start = async () => {
     }
     socket.emit('pulse:hello', { ok: true, ts: Date.now() });
   });
+  await startQueue({ logger: app.log, io, store: agentStore });
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
       await app.listen({ port: PORT, host: HOST });

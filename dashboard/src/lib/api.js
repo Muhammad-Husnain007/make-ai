@@ -62,3 +62,13 @@ export const getIssue = (id) => api(`/api/issues/${id}`);
 export const patchIssue = (id, status) => api(`/api/issues/${id}`, { method: 'PATCH', body: { status } });
 export const runIssueAgent = (id) => api(`/api/issues/${id}/agent`, { method: 'POST', body: {} });
 export const getStats = (projectId) => api(`/api/stats${projectId ? `?projectId=${projectId}` : ''}`);
+export const getQueues = () => api('/api/queues');
+export const getAdminNotifications = (companyId) => api(`/api/admin/notifications${companyId ? `?companyId=${companyId}` : ''}`);
+export const markAdminNotificationRead = (id) => api(`/api/admin/notifications/${id}`, { method: 'PATCH', body: {} });
+export const markAllAdminNotificationsRead = () => api('/api/admin/notifications/read-all', { method: 'POST', body: {} });
+
+export function inviteMailMessage(mailed, resent = false) {
+  if (mailed?.queued) return 'Invitation queued.';
+  if (mailed?.ok) return resent ? 'Email resent. Check inbox and spam.' : 'Email sent.';
+  return resent ? 'Email not sent. Use Copy link.' : 'Email not sent. Use Copy link on the invitation.';
+}

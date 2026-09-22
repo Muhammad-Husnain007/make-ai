@@ -150,6 +150,24 @@ ensureColumn('issues', 'pr_merged', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('issues', 'pr_closed', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('issues', 'emailed_at', 'TEXT');
 ensureColumn('issues', 'emailed_to', 'TEXT');
+ensureColumn('issues', 'agent_pipeline', 'TEXT');
+ensureColumn('issues', 'agent_error', 'TEXT');
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS admin_notifications (
+    id TEXT PRIMARY KEY,
+    company_id TEXT,
+    company_name TEXT NOT NULL DEFAULT '',
+    project_id TEXT,
+    issue_id TEXT,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    read_at TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_admin_notifications_unread ON admin_notifications(read_at, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_admin_notifications_company ON admin_notifications(company_id, created_at DESC);
+`);
 ensureColumn('projects', 'notify_email', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('projects', 'github_token', 'TEXT');
 ensureColumn('projects', 'github_repo', 'TEXT');

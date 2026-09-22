@@ -19,7 +19,7 @@ function loadCwdEnv() {
     ) {
       value = value.slice(1, -1);
     }
-    if (process.env[key] == null || process.env[key] === '') {
+    if (key.startsWith('PULSE_') || process.env[key] == null || process.env[key] === '') {
       process.env[key] = value;
     }
   }

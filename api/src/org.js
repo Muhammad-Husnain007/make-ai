@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { nanoid } from 'nanoid';
-import { sendInviteEmail } from '@pulse/agent';
 import { db } from './db.js';
 import { createProject } from './store.js';
+import { enqueueInvite } from './queue.js';
 
 export const PLATFORM_OWNER_EMAIL = 'hasnainilyas007@gmail.com';
 export const PR_PRICE_USD = 0.05;
@@ -209,7 +209,7 @@ export function getInvite(token) {
 
 async function sendInvite({ email, kind, companyName, invitedBy, origin, token }) {
   const inviteUrl = `${String(origin || 'http://127.0.0.1:5173').replace(/\/$/, '')}/invite/${token}`;
-  const mailed = await sendInviteEmail({
+  const mailed = await enqueueInvite({
     to: email,
     inviteUrl,
     companyName,
@@ -366,6 +366,11 @@ function money(pulls) {
   return Number((Number(pulls || 0) * PR_PRICE_USD).toFixed(2));
 }
 
+function unreadForCompany(id) {
+  if (!id) return 0;
+  return Number(db.prepare('SELECT COUNT(*) AS n FROM admin_notifications WHERE company_id = ? AND read_at IS NULL').get(id)?.n || 0);
+}
+
 function serializeAdminCompany(row) {
   if (!row) return null;
   const pullRequests = Number(row.pull_count || 0);
@@ -381,6 +386,7 @@ function serializeAdminCompany(row) {
     pricePerPull: PR_PRICE_USD,
     totalCost: money(pullRequests),
     createdAt: row.created_at,
+    unreadNotifications: unreadForCompany(row.id),
   };
 }
 
@@ -410,11 +416,66 @@ export function listAdminCompanies(actor) {
   return stmts.listCompanies.all().map(serializeAdminCompany);
 }
 
+function serializeAdminNotification(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    companyId: row.company_id || null,
+    companyName: row.company_name || '',
+    projectId: row.project_id || null,
+    issueId: row.issue_id || null,
+    title: row.title,
+    message: row.message,
+    readAt: row.read_at || null,
+    createdAt: row.created_at,
+  };
+}
+
+export function listAdminNotifications(actor, { companyId } = {}) {
+  requirePlatformOwner(actor);
+  const rows = companyId
+    ? db.prepare(`
+        SELECT * FROM admin_notifications
+        WHERE company_id = ?
+        ORDER BY created_at DESC
+        LIMIT 100
+      `).all(companyId)
+    : db.prepare(`
+        SELECT * FROM admin_notifications
+        ORDER BY created_at DESC
+        LIMIT 100
+      `).all();
+  const unread = companyId
+    ? db.prepare('SELECT COUNT(*) AS n FROM admin_notifications WHERE company_id = ? AND read_at IS NULL').get(companyId)
+    : db.prepare('SELECT COUNT(*) AS n FROM admin_notifications WHERE read_at IS NULL').get();
+  return {
+    notifications: rows.map(serializeAdminNotification),
+    unread: Number(unread?.n || 0),
+  };
+}
+
+export function markAdminNotificationRead(actor, id) {
+  requirePlatformOwner(actor);
+  db.prepare('UPDATE admin_notifications SET read_at = ? WHERE id = ? AND read_at IS NULL').run(new Date().toISOString(), id);
+  return listAdminNotifications(actor);
+}
+
+export function markAllAdminNotificationsRead(actor) {
+  requirePlatformOwner(actor);
+  db.prepare('UPDATE admin_notifications SET read_at = ? WHERE read_at IS NULL').run(new Date().toISOString());
+  return listAdminNotifications(actor);
+}
+
 export function getAdminCompany(actor, id) {
   requirePlatformOwner(actor);
   const row = stmts.companyAdminById.get(id);
   if (!row) fail('Company not found.', 404);
-  return serializeAdminCompany(row);
+  const notes = listAdminNotifications(actor, { companyId: id });
+  return {
+    ...serializeAdminCompany(row),
+    unreadNotifications: notes.unread,
+    notifications: notes.notifications,
+  };
 }
 
 export function setCompanyPaused(actor, id, paused) {

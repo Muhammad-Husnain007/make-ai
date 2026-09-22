@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { getTeam, inviteCompany, inviteMember, resendInvite } from '../lib/api.js';
+import { getTeam, inviteCompany, inviteMailMessage, inviteMember, resendInvite } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 
 function copy(value) {
@@ -32,7 +32,7 @@ export function TeamPage() {
       setEmail('');
       setCompanyName('');
       setCanInvite(false);
-      setStatus(result.mailed?.ok ? 'Email sent.' : 'Email not sent. Use Copy link on the invitation.');
+      setStatus(inviteMailMessage(result.mailed));
       await load();
     } catch (err) {
       setError(err.message);
@@ -174,7 +174,7 @@ export function TeamPage() {
                             setStatus('');
                             try {
                               const result = await resendInvite(invite.id);
-                              setStatus(result.mailed?.ok ? 'Email resent. Check inbox and spam.' : 'Email not sent. Use Copy link.');
+                              setStatus(inviteMailMessage(result.mailed, true));
                             } catch (err) {
                               setError(err.message);
                             } finally {

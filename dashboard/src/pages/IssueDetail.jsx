@@ -71,7 +71,9 @@ export function IssueDetail() {
           <p className="text-sm text-zinc-500">
             {issue.agent_status === 'running'
               ? 'AI is opening a pull request…'
-              : 'No pull request yet. The GitHub PR URL appears here as soon as the agent opens one.'}
+              : issue.agent_status === 'maintenance'
+                ? 'This issue is currently under maintenance. A pull request will appear here when it is ready.'
+                : 'No pull request yet. The GitHub PR URL appears here as soon as the agent opens one.'}
           </p>
         )}
       </section>
@@ -102,10 +104,18 @@ export function IssueDetail() {
             {issue.agent_status === 'running' || running ? 'Finding fix…' : 'Run AI fix'}
           </button>
         </div>
-        <p className="mb-3 text-sm text-zinc-400">{issue.agent_summary || 'New error/fatal issues trigger the agent automatically. It writes a fix on the client GitHub base branch, opens a PR, and emails the address the client registered.'}</p>
-        {issue.agent_solution && (
+        <p className="mb-3 text-sm text-zinc-400">
+          {issue.agent_status === 'maintenance'
+            ? 'This issue is currently under maintenance. Pulse is working on a fix.'
+            : issue.agent_summary || 'New error/fatal issues trigger the agent automatically. It writes a fix on the client GitHub base branch, opens a PR, and emails the address the client registered.'}
+        </p>
+        {issue.agent_status === 'maintenance' ? (
+          <div className="mb-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+            This issue is currently under maintenance. You will see the pull request here when it is ready.
+          </div>
+        ) : issue.agent_solution ? (
           <pre className="mb-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-3 font-mono text-[12px] text-orange-100/90">{issue.agent_solution}</pre>
-        )}
+        ) : null}
         <div className="flex flex-wrap gap-4 text-xs text-zinc-400">
           {issue.pr_url && <PullLink url={issue.pr_url} className="text-xs" />}
           <span className="inline-flex items-center gap-1">

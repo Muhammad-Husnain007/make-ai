@@ -15,6 +15,7 @@ export function usePulseLive(onEvent) {
     });
     socket.on('pulse:event', (payload) => callback.current(payload));
     socket.on('pulse:issue', (issue) => callback.current({ issue }));
+    socket.on('pulse:notification', (notification) => callback.current({ notification }));
     socket.on('pulse:settings', (project) => callback.current({ project }));
     return () => socket.disconnect();
   }, []);

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getAdminCompanies, getTeam, inviteCompany, resendInvite } from '../lib/api.js';
+import { getAdminCompanies, getTeam, inviteCompany, inviteMailMessage, resendInvite } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 
 function money(value) {
@@ -43,7 +43,7 @@ export function CompaniesPage() {
       setCompanyName('');
       setEmail('');
       setAddress('');
-      setStatus(result.mailed?.ok ? 'Email sent.' : 'Email not sent. Use Copy link on the invitation.');
+      setStatus(inviteMailMessage(result.mailed));
       await load();
     } catch (err) {
       setError(err.message);
@@ -83,12 +83,13 @@ export function CompaniesPage() {
                 <th className="px-4 py-3">Email</th>
                 <th className="px-4 py-3">Pull requests</th>
                 <th className="px-4 py-3">Cost</th>
+                <th className="px-4 py-3">Errors</th>
                 <th className="px-4 py-3">Status</th>
               </tr>
             </thead>
             <tbody>
               {companies.length === 0 && (
-                <tr><td colSpan={5} className="px-4 py-8 text-center text-zinc-500">No companies yet.</td></tr>
+                <tr><td colSpan={6} className="px-4 py-8 text-center text-zinc-500">No companies yet.</td></tr>
               )}
               {companies.map((company) => (
                 <tr
@@ -100,6 +101,13 @@ export function CompaniesPage() {
                   <td className="px-4 py-3 font-mono text-xs text-zinc-400">{company.email || 'pending'}</td>
                   <td className="px-4 py-3">{company.pullRequests}</td>
                   <td className="px-4 py-3">{money(company.totalCost)}</td>
+                  <td className="px-4 py-3">
+                    {company.unreadNotifications > 0 ? (
+                      <span className="rounded-full bg-orange-500 px-2 py-0.5 text-[11px] font-bold text-ink-950">{company.unreadNotifications}</span>
+                    ) : (
+                      <span className="text-zinc-500">0</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3 capitalize">{company.paused ? 'paused' : 'active'}</td>
                 </tr>
               ))}
@@ -141,7 +149,7 @@ export function CompaniesPage() {
                             setStatus('');
                             try {
                               const result = await resendInvite(invite.id);
-                              setStatus(result.mailed?.ok ? 'Email resent. Check inbox and spam.' : 'Email not sent. Use Copy link.');
+                              setStatus(inviteMailMessage(result.mailed, true));
                             } catch (err) {
                               setError(err.message);
                             } finally {

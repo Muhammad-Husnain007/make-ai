@@ -1,8 +1,8 @@
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Building2, Gauge, LogOut, MemoryStick, Settings2, ShieldAlert, Users } from 'lucide-react';
+import { AlertTriangle, Bell, Building2, Gauge, ListTodo, LogOut, MemoryStick, Settings2, ShieldAlert, Users } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth.jsx';
 
-export function Shell({ children }) {
+export function Shell({ children, unread = 0 }) {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, logout } = useAuth();
@@ -13,20 +13,41 @@ export function Shell({ children }) {
     <div className="min-h-screen bg-ink-950 text-zinc-100">
       <div className="flex min-h-screen">
         <aside className="flex w-60 shrink-0 flex-col border-r border-white/5 bg-ink-900 px-4 py-5">
-          <NavLink to="/" className="mb-8 flex items-center gap-3 px-2">
-            <span className={`flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500 text-ink-950 shadow-[0_0_24px_rgba(249,115,22,.35)] ${homeActive ? 'ring-2 ring-orange-200/40' : ''}`}>
-              <ShieldAlert size={18} />
-            </span>
-            <div>
-              <div className="text-sm font-bold tracking-tight">Pulse</div>
-              <div className="text-[11px] text-zinc-500">{admin ? 'Platform admin' : 'Error command center'}</div>
-            </div>
-          </NavLink>
+          <div className="mb-8 flex items-start justify-between gap-2">
+            <NavLink to="/" className="flex items-center gap-3 px-2">
+              <span className={`flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500 text-ink-950 shadow-[0_0_24px_rgba(249,115,22,.35)] ${homeActive ? 'ring-2 ring-orange-200/40' : ''}`}>
+                <ShieldAlert size={18} />
+              </span>
+              <div>
+                <div className="text-sm font-bold tracking-tight">Pulse</div>
+                <div className="text-[11px] text-zinc-500">{admin ? 'Platform admin' : 'Error command center'}</div>
+              </div>
+            </NavLink>
+            {admin && (
+              <NavLink
+                to="/notifications"
+                className={({ isActive }) => `relative mt-1 rounded-lg p-2 ${isActive ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}
+                title="Notifications"
+              >
+                <Bell size={18} />
+                {unread > 0 && (
+                  <span className="absolute -right-0.5 -top-0.5 min-w-[18px] rounded-full bg-orange-500 px-1 text-center text-[10px] font-bold leading-4 text-ink-950">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                )}
+              </NavLink>
+            )}
+          </div>
           <nav className="space-y-1 text-sm">
             {admin ? (
-              <NavLink to="/companies" className={({ isActive }) => `flex items-center gap-2 rounded-lg px-3 py-2 ${isActive || location.pathname.startsWith('/companies/') ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}>
-                <Building2 size={16} /> Companies
-              </NavLink>
+              <>
+                <NavLink to="/companies" className={({ isActive }) => `flex items-center gap-2 rounded-lg px-3 py-2 ${isActive || location.pathname.startsWith('/companies/') ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}>
+                  <Building2 size={16} /> Companies
+                </NavLink>
+                <NavLink to="/jobs" className={({ isActive }) => `flex items-center gap-2 rounded-lg px-3 py-2 ${isActive ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}>
+                  <ListTodo size={16} /> Jobs
+                </NavLink>
+              </>
             ) : (
               <>
                 <NavLink to="/open" className={() => `flex items-center gap-2 rounded-lg px-3 py-2 ${issuesActive ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}>

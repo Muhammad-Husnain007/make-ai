@@ -79,9 +79,12 @@ const stmts = {
         pr_closed = CASE WHEN @prUrl != '' THEN 0 ELSE pr_closed END,
         status = CASE WHEN @prUrl != '' THEN 'resolved' ELSE status END,
         emailed_at = @emailedAt,
-        emailed_to = @emailedTo
+        emailed_to = @emailedTo,
+        agent_error = @agentError
     WHERE id = @id
   `),
+  setPipeline: db.prepare('UPDATE issues SET agent_pipeline = ? WHERE id = ?'),
+  getPipeline: db.prepare('SELECT agent_pipeline FROM issues WHERE id = ?'),
   applyPullState: db.prepare(`
     UPDATE issues
     SET pr_merged = @merged,
@@ -96,7 +99,7 @@ export function setAgentStatus(id, status) {
   return stmts.getIssue.get(id);
 }
 
-export function saveAgentResult(id, { status, summary, solution, prUrl, emailedAt, emailedTo }) {
+export function saveAgentResult(id, { status, summary, solution, prUrl, emailedAt, emailedTo, agentError }) {
   stmts.saveAgent.run({
     id,
     status: status || 'done',
@@ -105,8 +108,85 @@ export function saveAgentResult(id, { status, summary, solution, prUrl, emailedA
     prUrl: prUrl || '',
     emailedAt: emailedAt || null,
     emailedTo: emailedTo || '',
+    agentError: agentError || '',
   });
   return stmts.getIssue.get(id);
+}
+
+export function saveAgentPipeline(id, payload) {
+  stmts.setPipeline.run(JSON.stringify(payload || {}), id);
+  return stmts.getIssue.get(id);
+}
+
+export function getAgentPipeline(id) {
+  const row = stmts.getPipeline.get(id);
+  try {
+    return JSON.parse(row?.agent_pipeline || '{}') || {};
+  } catch {
+    return {};
+  }
+}
+
+const noteStmts = {
+  insert: db.prepare(`
+    INSERT INTO admin_notifications (id, company_id, company_name, project_id, issue_id, title, message, created_at)
+    VALUES (@id, @company_id, @company_name, @project_id, @issue_id, @title, @message, @created_at)
+  `),
+  unreadByIssue: db.prepare(`
+    SELECT * FROM admin_notifications
+    WHERE issue_id = ? AND read_at IS NULL
+    ORDER BY created_at DESC
+    LIMIT 1
+  `),
+  updateUnread: db.prepare(`
+    UPDATE admin_notifications
+    SET message = @message, title = @title, company_id = @company_id, company_name = @company_name, created_at = @created_at
+    WHERE id = @id
+  `),
+  companyName: db.prepare('SELECT name FROM companies WHERE id = ?'),
+};
+
+function serializeNotification(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    companyId: row.company_id || null,
+    companyName: row.company_name || '',
+    projectId: row.project_id || null,
+    issueId: row.issue_id || null,
+    title: row.title,
+    message: row.message,
+    readAt: row.read_at || null,
+    createdAt: row.created_at,
+  };
+}
+
+export function createAdminNotification({ companyId, projectId, issueId, title, message }) {
+  const companyName = companyId ? (noteStmts.companyName.get(companyId)?.name || '') : '';
+  const payload = {
+    id: nanoid(),
+    company_id: companyId || null,
+    company_name: companyName,
+    project_id: projectId || null,
+    issue_id: issueId || null,
+    title: String(title || 'AI agent error').slice(0, 240),
+    message: String(message || 'Unknown agent error').slice(0, 4000),
+    created_at: new Date().toISOString(),
+  };
+  const existing = issueId ? noteStmts.unreadByIssue.get(issueId) : null;
+  if (existing) {
+    noteStmts.updateUnread.run({
+      id: existing.id,
+      message: payload.message,
+      title: payload.title,
+      company_id: payload.company_id,
+      company_name: payload.company_name,
+      created_at: payload.created_at,
+    });
+    return serializeNotification({ ...existing, ...payload, id: existing.id, read_at: null });
+  }
+  noteStmts.insert.run(payload);
+  return serializeNotification(payload);
 }
 
 export function normalizeNotifyEmail(value) {

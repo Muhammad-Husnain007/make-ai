@@ -10,6 +10,7 @@ export default defineConfig({
       '/api': 'http://127.0.0.1:8787',
       '/ingest': 'http://127.0.0.1:8787',
       '/health': 'http://127.0.0.1:8787',
+      '/queues': 'http://127.0.0.1:8787',
       '/realtime': {
         target: 'http://127.0.0.1:8787',
         ws: true,

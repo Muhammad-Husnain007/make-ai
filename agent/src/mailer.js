@@ -114,7 +114,6 @@ export async function emailFixReport({ issue, event, analysis, prUrl, error, to,
       <p><strong>Environment:</strong> ${escapeHtml(event?.environment || 'n/a')}</p>
       ${prUrl ? `<p><strong>Pull request:</strong> <a href="${escapeHtml(prUrl)}">${escapeHtml(prUrl)}</a></p>` : ''}
       <p>The PR is based on the client's current GitHub base-branch files, with the AI patch applied on top.</p>
-      ${error ? `<p style="color:#b91c1c"><strong>Agent note:</strong> ${escapeHtml(error)}</p>` : ''}
       <h3>Root cause</h3>
       <p>${escapeHtml(analysis?.rootCause || 'Not available')}</p>
       <h3>Solution</h3>

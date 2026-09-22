@@ -29,7 +29,11 @@ Pulse `.env` only needs SaaS keys:
 GEMINI_API_KEY=your_gemini_api_key
 SMTP_USER=you@gmail.com
 SMTP_PASS=your_app_password
+ISQUEUEENABLE=false
+REDIS_URL=redis://127.0.0.1:6379
 ```
+
+Set `ISQUEUEENABLE=true` to run scan, fix, PR, and invitation emails as BullMQ jobs (Redis required). The Jobs page and `/queues/ui` dashboard show those queues. `false` keeps the current inline behavior.
 
 Pulse sends mail with those SMTP credentials. Whether a client wants PR emails is `ISENABLEDSENDEMAIL` in **that client app**, not in Pulse.
 

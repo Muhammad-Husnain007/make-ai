@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ConfirmModal } from '../components/ConfirmModal.jsx';
 import { getAdminCompany, patchAdminCompany } from '../lib/api.js';
+import { timeAgo } from '../lib/time.js';
 
 function money(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -83,7 +84,26 @@ export function CompanyDetail() {
             <Field label="Total pull requests" value={String(company.pullRequests)} large />
             <Field label="Per pull request" value={money(company.pricePerPull)} large />
             <Field label="Total cost" value={money(company.totalCost)} large />
+            <Field label="Unread agent errors" value={String(company.unreadNotifications || 0)} />
           </div>
+        )}
+
+        {company?.notifications?.length > 0 && (
+          <section className="mt-8">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-sm font-semibold">Agent errors</h2>
+              <Link to={`/notifications?companyId=${company.id}`} className="text-xs text-orange-300 hover:underline">View all</Link>
+            </div>
+            <div className="space-y-3">
+              {company.notifications.slice(0, 8).map((note) => (
+                <div key={note.id} className={`rounded-xl border px-4 py-3 ${note.readAt ? 'border-white/5 bg-black/20' : 'border-orange-400/20 bg-orange-500/5'}`}>
+                  <div className="text-sm font-medium text-zinc-100">{note.title}</div>
+                  <pre className="mt-2 whitespace-pre-wrap font-mono text-[12px] text-red-200">{note.message}</pre>
+                  <div className="mt-2 text-[11px] text-zinc-500">{timeAgo(note.createdAt)}</div>
+                </div>
+              ))}
+            </div>
+          </section>
         )}
       </section>
 

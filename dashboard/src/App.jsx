@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Navigate, Route, Routes } from 'react-router-dom';
 import { Shell } from './components/Shell.jsx';
 import { AuthProvider, useAuth } from './hooks/useAuth.jsx';
@@ -7,11 +7,14 @@ import { HomePage } from './pages/HomePage.jsx';
 import { InvitePage } from './pages/InvitePage.jsx';
 import { IssueDetail } from './pages/IssueDetail.jsx';
 import { IssuesPage } from './pages/IssuesPage.jsx';
+import { JobsPage } from './pages/JobsPage.jsx';
 import { LoginPage, RegisterPage } from './pages/AuthPages.jsx';
 import { CompaniesPage } from './pages/CompaniesPage.jsx';
 import { CompanyDetail } from './pages/CompanyDetail.jsx';
+import { NotificationsPage } from './pages/NotificationsPage.jsx';
 import { SetupPage } from './pages/SetupPage.jsx';
 import { TeamPage } from './pages/TeamPage.jsx';
+import { getAdminNotifications } from './lib/api.js';
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
@@ -33,16 +36,32 @@ function ClientOnly({ children }) {
 }
 
 function AuthedApp() {
+  const { user } = useAuth();
   const [refreshKey, setRefreshKey] = useState(0);
+  const [unread, setUnread] = useState(0);
+
+  useEffect(() => {
+    if (!user?.platformOwner) {
+      setUnread(0);
+      return;
+    }
+    getAdminNotifications()
+      .then((data) => setUnread(Number(data.unread || 0)))
+      .catch(() => setUnread(0));
+  }, [user, refreshKey]);
+
   usePulseLive(() => {
     setRefreshKey((value) => value + 1);
   });
+
   return (
-    <Shell>
+    <Shell unread={unread}>
       <Routes>
         <Route path="/" element={<HomePage refreshKey={refreshKey} />} />
         <Route path="/companies" element={<AdminOnly><CompaniesPage /></AdminOnly>} />
         <Route path="/companies/:id" element={<AdminOnly><CompanyDetail /></AdminOnly>} />
+        <Route path="/jobs" element={<AdminOnly><JobsPage refreshKey={refreshKey} /></AdminOnly>} />
+        <Route path="/notifications" element={<AdminOnly><NotificationsPage refreshKey={refreshKey} /></AdminOnly>} />
         <Route path="/open" element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="open" /></ClientOnly>} />
         <Route path="/fixed" element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="fixed" /></ClientOnly>} />
         <Route path="/pulls" element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="create-pull" /></ClientOnly>} />
