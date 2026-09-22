@@ -9,6 +9,8 @@ import { Badge } from '../components/Badge.jsx';
 import { Meta } from '../components/Meta.jsx';
 import { PullLink } from '../components/PullLink.jsx';
 import { Row } from '../components/Row.jsx';
+import { StatusPill } from '../components/StatusPill.jsx';
+import { issueStatus } from '../lib/issueStatus.js';
 
 export function IssueDetail() {
   const { id } = useParams();
@@ -32,24 +34,24 @@ export function IssueDetail() {
     });
   });
 
-  if (!issue) return <div className="p-8 text-zinc-500">Loading issue…</div>;
+  if (!issue) return <div className="p-4 text-zinc-500 sm:p-8">Loading issue…</div>;
   const latest = issue.events?.[0];
 
   return (
-    <div className="p-8">
+    <div className="p-4 sm:p-6 lg:p-8">
       <button onClick={() => navigate('/open')} className="mb-5 text-sm text-zinc-500 hover:text-white">← All issues</button>
-      <div className="mb-6 flex items-start justify-between gap-4">
-        <div>
-          <div className="mb-2 flex items-center gap-2"><Badge level={issue.level} /><AgentPill status={issue.agent_status} /><span className="text-xs text-zinc-500">{issue.status}</span></div>
-          <h1 className="max-w-3xl text-2xl font-semibold tracking-tight">{issue.title}</h1>
-          <p className="mt-2 font-mono text-xs text-zinc-500">{issue.culprit}</p>
+      <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row">
+        <div className="min-w-0">
+          <div className="mb-2 flex flex-wrap items-center gap-2"><Badge level={issue.level} /><AgentPill status={issue.agent_status} /><StatusPill status={issueStatus(issue)} /></div>
+          <h1 className="max-w-3xl break-words text-xl font-semibold tracking-tight sm:text-2xl">{issue.title}</h1>
+          <p className="mt-2 break-all font-mono text-xs text-zinc-500">{issue.culprit}</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto">
           {['open', 'resolved', 'ignored'].map((status) => (
             <button
               key={status}
               onClick={async () => { await patchIssue(issue.id, status); load(); }}
-              className={`rounded-lg border px-3 py-2 text-xs capitalize ${issue.status === status ? 'border-orange-400/40 bg-orange-500/15 text-orange-200' : 'border-white/10 text-zinc-400 hover:bg-white/5'}`}
+              className={`rounded-lg border px-3 py-2 text-xs capitalize sm:flex-none flex-1 ${issue.status === status ? 'border-orange-400/40 bg-orange-500/15 text-orange-200' : 'border-white/10 text-zinc-400 hover:bg-white/5'}`}
             >
               {status}
             </button>
@@ -57,8 +59,8 @@ export function IssueDetail() {
         </div>
       </div>
 
-      <div className="mb-6 grid grid-cols-3 gap-3 text-sm">
-        <Meta label="Users" value={issue.user_count} />
+      <div className="mb-6 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
+        <Meta label="Users affected" value={Number(issue.user_count || issue.affectedUsers?.length || 0)} />
         <Meta label="First seen" value={timeAgo(issue.first_seen)} />
         <Meta label="Last seen" value={timeAgo(issue.last_seen)} />
       </div>
@@ -79,7 +81,7 @@ export function IssueDetail() {
       </section>
 
       <section className="mb-5 rounded-2xl border border-orange-400/20 bg-orange-500/5 p-5">
-        <div className="mb-3 flex items-center justify-between gap-3">
+        <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <h2 className="flex items-center gap-2 text-sm font-semibold"><Bot size={16} /> AI agent</h2>
           <button
             disabled={running || issue.agent_status === 'running'}
@@ -99,7 +101,7 @@ export function IssueDetail() {
                 setRunning(false);
               }
             }}
-            className="rounded-lg border border-orange-400/30 px-3 py-1.5 text-xs text-orange-200 hover:bg-orange-500/10 disabled:opacity-50"
+            className="w-full rounded-lg border border-orange-400/30 px-3 py-1.5 text-xs text-orange-200 hover:bg-orange-500/10 disabled:opacity-50 sm:w-auto"
           >
             {issue.agent_status === 'running' || running ? 'Finding fix…' : 'Run AI fix'}
           </button>
@@ -114,7 +116,7 @@ export function IssueDetail() {
             This issue is currently under maintenance. You will see the pull request here when it is ready.
           </div>
         ) : issue.agent_solution ? (
-          <pre className="mb-3 max-h-56 overflow-auto whitespace-pre-wrap rounded-xl bg-black/30 p-3 font-mono text-[12px] text-orange-100/90">{issue.agent_solution}</pre>
+          <pre className="mb-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/30 p-3 font-mono text-[12px] text-orange-100/90">{issue.agent_solution}</pre>
         ) : null}
         <div className="flex flex-wrap gap-4 text-xs text-zinc-400">
           {issue.pr_url && <PullLink url={issue.pr_url} className="text-xs" />}
@@ -126,10 +128,10 @@ export function IssueDetail() {
         </div>
       </section>
 
-      <div className="grid grid-cols-[1.3fr_.7fr] gap-5">
-        <section className="rounded-2xl border border-white/8 bg-ink-900 p-5">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[1.3fr_.7fr]">
+        <section className="min-w-0 rounded-2xl border border-white/8 bg-ink-900 p-4 sm:p-5">
           <h2 className="mb-3 text-sm font-semibold">Stack trace</h2>
-          <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-relaxed text-orange-100/90">{latest?.stack || 'No stack captured.'}</pre>
+          <pre className="max-h-[420px] overflow-auto whitespace-pre-wrap break-words font-mono text-[12px] leading-relaxed text-orange-100/90">{latest?.stack || 'No stack captured.'}</pre>
         </section>
         <section className="space-y-5">
           <div className="rounded-2xl border border-white/8 bg-ink-900 p-5 text-sm">
@@ -140,6 +142,20 @@ export function IssueDetail() {
             <Row k="Release" v={latest?.release} />
             <Row k="User" v={latest?.user?.email || latest?.user?.id || 'anonymous'} />
             <Row k="SDK" v={latest?.sdk} />
+          </div>
+          <div className="rounded-2xl border border-white/8 bg-ink-900 p-5 text-sm">
+            <h2 className="mb-3 text-sm font-semibold">Affected users</h2>
+            {(issue.affectedUsers || []).length === 0 ? (
+              <p className="text-sm text-zinc-500">No user identities captured for this issue yet.</p>
+            ) : (
+              (issue.affectedUsers || []).map((person) => (
+                <Row
+                  key={person.id}
+                  k={person.email || person.id}
+                  v={`${person.events} ${person.events === 1 ? 'event' : 'events'}`}
+                />
+              ))
+            )}
           </div>
         </section>
       </div>

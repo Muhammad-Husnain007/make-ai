@@ -1,6 +1,7 @@
 import { Children, useState } from 'react';
 import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
-import { Eye, EyeOff, ShieldAlert } from 'lucide-react';
+import { CheckCircle2, Eye, EyeOff, ShieldAlert } from 'lucide-react';
+import { ThemeToggle } from '../components/ThemeToggle.jsx';
 import { requestRegisterOtp, requestResetOtp, verifyRegisterOtp, verifyResetOtp } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
 
@@ -51,11 +52,11 @@ function PasswordField({ label, value, onChange, autoComplete = 'new-password' }
 function AuthBrand() {
   return (
     <div className="flex items-center gap-3.5">
-      <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500 text-ink-950 shadow-[0_0_24px_rgba(249,115,22,.35)]">
+      <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-orange-500 text-ink-950 shadow-[0_0_24px_rgba(249,115,22,.35)] sm:h-12 sm:w-12">
         <ShieldAlert size={22} />
       </span>
       <div>
-        <div className="text-xl font-bold tracking-tight">Pulse</div>
+        <div className="text-lg font-bold tracking-tight sm:text-xl">Pulse</div>
         <div className="text-xs text-zinc-500">Error command center</div>
       </div>
     </div>
@@ -65,8 +66,11 @@ function AuthBrand() {
 function AuthLayout({ children }) {
   return (
     <div className="relative min-h-screen overflow-x-hidden bg-ink-950 text-zinc-100">
-      <div className="absolute left-6 top-6 z-10 sm:left-8 sm:top-8">
+      <div className="absolute left-4 top-4 z-10 sm:left-8 sm:top-8">
         <AuthBrand />
+      </div>
+      <div className="absolute right-4 top-4 z-10 sm:right-8 sm:top-8">
+        <ThemeToggle />
       </div>
       {children}
     </div>
@@ -76,7 +80,7 @@ function AuthLayout({ children }) {
 function AuthCard({ title, subtitle, step, total, footer, children }) {
   return (
     <div className="w-full max-w-md">
-      <div className="rounded-2xl border border-white/5 bg-ink-900 p-6">
+      <div className="rounded-2xl border border-white/5 bg-ink-900 p-5 sm:p-6">
         {total > 1 && (
           <div className="mb-5 flex gap-1.5">
             {Array.from({ length: total }, (_, index) => (
@@ -101,7 +105,7 @@ function AuthSlider({ step, children }) {
     >
       {Children.map(children, (child, index) => (
         <div
-          className={`flex min-h-screen w-screen shrink-0 items-center justify-center px-4 ${index === step ? '' : 'pointer-events-none'}`}
+          className={`flex min-h-screen w-screen shrink-0 items-center justify-center px-4 pb-8 pt-24 sm:px-6 ${index === step ? '' : 'pointer-events-none'}`}
           aria-hidden={index !== step}
         >
           {child}
@@ -114,7 +118,7 @@ function AuthSlider({ step, children }) {
 function AuthShell({ title, subtitle, children, footer }) {
   return (
     <AuthLayout>
-      <div className="flex min-h-screen items-center justify-center px-4">
+      <div className="flex min-h-screen items-center justify-center px-4 pb-8 pt-24 sm:px-6">
         <AuthCard title={title} subtitle={subtitle} footer={footer}>
           {children}
         </AuthCard>
@@ -127,7 +131,7 @@ function StepActions({ step, last, busy, done, lastLabel, onBack }) {
   return (
     <>
       {done && <div className="mt-4 text-sm text-emerald-300">{done}</div>}
-      <div className="mt-4 flex gap-2">
+      <div className="mt-4 flex flex-col-reverse gap-2 sm:flex-row">
         {step > 0 && !done && (
           <button type="button" onClick={onBack} className="h-11 rounded-lg border border-white/10 px-4 text-sm text-zinc-300">
             Back
@@ -165,7 +169,12 @@ export function LoginPage() {
     'Password must be at least 8 characters.',
   ];
 
-  if (ready && user) return <Navigate to={inviteToken ? `/invite/${inviteToken}` : '/'} replace />;
+  if (ready && user) {
+    if (inviteToken && !user.company && !user.platformOwner) {
+      return <Navigate to={`/invite/${inviteToken}`} replace />;
+    }
+    return <Navigate to="/" replace />;
+  }
 
   const goReset = (next) => {
     setError('');
@@ -207,7 +216,7 @@ export function LoginPage() {
       } else {
         const data = await resetPassword({ email, otp, password });
         if (!data.token) {
-          setDone('Password updated. You can log in after you accept a Pulse invitation.');
+          navigate('/register/thanks', { replace: true });
           return;
         }
         sessionStorage.removeItem('pulse_invite');
@@ -264,7 +273,7 @@ export function LoginPage() {
   return (
     <AuthShell
       title="Sign in"
-      subtitle="Login works after you accept a Pulse invitation."
+      subtitle="Login is only for people who already have Pulse access."
       footer={<>No account? <Link to={inviteToken ? `/register?invite=${inviteToken}` : '/register'} className="text-orange-300 hover:underline">Register</Link></>}
     >
       <form
@@ -276,8 +285,17 @@ export function LoginPage() {
           try {
             await login({ email, password, inviteToken: inviteToken || undefined });
             sessionStorage.removeItem('pulse_invite');
-            navigate(inviteToken ? `/invite/${inviteToken}` : '/', { replace: true });
+            navigate('/', { replace: true });
           } catch (err) {
+            if (err.inviteToken) {
+              sessionStorage.setItem('pulse_invite', err.inviteToken);
+              navigate(`/invite/${err.inviteToken}`, { replace: true });
+              return;
+            }
+            if (err.message?.includes('do not have access')) {
+              navigate('/register/thanks', { replace: true });
+              return;
+            }
             setError(err.message);
           } finally {
             setBusy(false);
@@ -323,7 +341,12 @@ export function RegisterPage() {
     'Password must be at least 8 characters.',
   ];
 
-  if (ready && user) return <Navigate to={inviteToken ? `/invite/${inviteToken}` : '/'} replace />;
+  if (ready && user) {
+    if (inviteToken && !user.company && !user.platformOwner) {
+      return <Navigate to={`/invite/${inviteToken}`} replace />;
+    }
+    return <Navigate to="/" replace />;
+  }
 
   const go = (next) => {
     setError('');
@@ -349,9 +372,14 @@ export function RegisterPage() {
         go(3);
       } else {
         const data = await register({ name, email, password, otp, inviteToken: inviteToken || undefined });
-        sessionStorage.removeItem('pulse_invite');
-        if (!data.token) {
-          setDone('Account created. You can log in after you accept a Pulse invitation.');
+        const pendingToken = data.inviteToken || inviteToken;
+        if (!data.token || data.needsInvite) {
+          if (pendingToken) {
+            sessionStorage.setItem('pulse_invite', pendingToken);
+            navigate(`/invite/${pendingToken}`, { replace: true });
+            return;
+          }
+          navigate('/register/thanks', { replace: true });
           return;
         }
         navigate('/', { replace: true });
@@ -363,7 +391,9 @@ export function RegisterPage() {
     }
   };
 
-  const footer = <>Already have an account? <Link to={inviteToken ? `/login?invite=${inviteToken}` : '/login'} className="text-orange-300 hover:underline">Login</Link></>;
+  const footer = inviteToken
+    ? null
+    : <>Already have an account? <Link to="/login" className="text-orange-300 hover:underline">Login</Link></>;
   const fields = [
     <Field key="name" label="Name" value={name} onChange={setName} autoComplete="name" />,
     <Field key="email" label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" readOnly={Boolean(params.get('email'))} />,
@@ -399,5 +429,27 @@ export function RegisterPage() {
       ))}
     </AuthSlider>
     </AuthLayout>
+  );
+}
+
+export function RegisterThanksPage() {
+  const { user, ready } = useAuth();
+  if (ready && user) return <Navigate to="/" replace />;
+
+  return (
+    <AuthShell
+      title="Thank you"
+      subtitle="Your Pulse account is created."
+    >
+      <div className="flex flex-col items-center text-center">
+        <span className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-orange-500/15 text-orange-300">
+          <CheckCircle2 size={26} />
+        </span>
+        <p className="text-sm leading-6 text-zinc-300">
+          Thank you for registering. You do not have access to the dashboard yet.
+          When someone invites this email to Pulse, open that invitation to continue.
+        </p>
+      </div>
+    </AuthShell>
   );
 }

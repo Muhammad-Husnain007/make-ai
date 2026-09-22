@@ -3,7 +3,7 @@ import { promisify } from 'node:util';
 import { nanoid } from 'nanoid';
 import { sendOtpEmail } from '@pulse/agent';
 import { db } from './db.js';
-import { acceptInvite, canSignIn, getInvite, hydrateUser } from './org.js';
+import { acceptInvite, canSignIn, getInvite, hydrateUser, pendingInviteForEmail } from './org.js';
 
 const scryptAsync = promisify(scrypt);
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -222,10 +222,11 @@ export async function registerUser({ name, email, password, inviteToken, otp }) 
   };
   stmts.insertUser.run(user.id, user.name, user.email, await hashPassword(cleanPassword), user.created_at);
   stmts.deleteOtp.run(cleanEmail);
-  if (inviteToken) acceptInvite(inviteToken, user);
+  const pending = inviteToken ? getInvite(inviteToken) : pendingInviteForEmail(cleanEmail);
+  const pendingToken = pending?.status === 'pending' ? pending.token : (inviteToken || pending?.token || null);
   const serialized = serializeUser(user);
   if (!canSignIn(serialized)) {
-    return { user: serialized, token: null, needsInvite: true };
+    return { user: serialized, token: null, needsInvite: true, inviteToken: pendingToken || null };
   }
   return { user: serialized, token: createSession(user.id) };
 }
@@ -243,8 +244,12 @@ export async function loginUser({ email, password, inviteToken }) {
   if (inviteToken) acceptInvite(inviteToken, row);
   const serialized = serializeUser(row);
   if (!canSignIn(serialized)) {
-    const err = new Error('Accept your invitation before signing in.');
+    const pending = pendingInviteForEmail(cleanEmail);
+    const err = new Error(pending
+      ? 'You have a pending Pulse invitation. Open it to continue.'
+      : 'You do not have access yet. Wait for a Pulse invitation.');
     err.statusCode = 403;
+    err.inviteToken = pending?.token || null;
     throw err;
   }
   return { user: serialized, token: createSession(row.id) };
@@ -337,7 +342,12 @@ export function getUserByToken(token) {
     if (row) stmts.deleteSession.run(token);
     return null;
   }
-  return canSignIn(serializeUser(row)) ? serializeUser(row) : null;
+  const user = serializeUser(row);
+  if (!canSignIn(user)) {
+    stmts.deleteUserSessions.run(row.id);
+    return null;
+  }
+  return user;
 }
 
 export function logoutToken(token) {

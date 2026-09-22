@@ -12,7 +12,7 @@ function Field({ label, value, large }) {
   return (
     <div className="rounded-2xl border border-white/5 bg-black/20 px-5 py-4">
       <div className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</div>
-      <div className={`mt-2 font-semibold tracking-tight text-zinc-100 ${large ? 'text-3xl' : 'text-lg'}`}>{value || '—'}</div>
+      <div className={`mt-2 break-words font-semibold tracking-tight text-zinc-100 ${large ? 'text-2xl sm:text-3xl' : 'text-lg'}`}>{value || '—'}</div>
     </div>
   );
 }
@@ -46,16 +46,16 @@ export function CompanyDetail() {
   };
 
   if (!company && !error) {
-    return <div className="flex flex-1 items-center p-8 text-sm text-zinc-500">Loading…</div>;
+    return <div className="flex flex-1 items-center p-4 text-sm text-zinc-500 sm:p-8">Loading…</div>;
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col p-6">
-      <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-white/5 bg-ink-900 p-8">
+    <div className="flex min-h-0 flex-1 flex-col p-4 sm:p-6">
+      <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-white/5 bg-ink-900 p-4 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
+          <div className="min-w-0">
             <Link to="/companies" className="text-sm text-orange-300 hover:underline">Back to companies</Link>
-            <h1 className="mt-3 text-3xl font-semibold tracking-tight">{company?.name || 'Company'}</h1>
+            <h1 className="mt-3 break-words text-2xl font-semibold tracking-tight sm:text-3xl">{company?.name || 'Company'}</h1>
             <p className="mt-1 text-sm text-zinc-500">Billing card — $0.05 for each pull request Pulse opens for this company.</p>
           </div>
           {company && (
@@ -68,7 +68,7 @@ export function CompanyDetail() {
                 onClick={() => setConfirm(company.paused ? 'resume' : 'pause')}
                 className={`relative h-6 w-11 rounded-full transition ${company.paused ? 'bg-white/10' : 'bg-orange-500'}`}
               >
-                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition ${company.paused ? 'left-0.5' : 'left-[22px]'}`} />
+                <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-[#fff] transition ${company.paused ? 'left-0.5' : 'left-[22px]'}`} />
               </button>
             </label>
           )}
@@ -98,7 +98,7 @@ export function CompanyDetail() {
               {company.notifications.slice(0, 8).map((note) => (
                 <div key={note.id} className={`rounded-xl border px-4 py-3 ${note.readAt ? 'border-white/5 bg-black/20' : 'border-orange-400/20 bg-orange-500/5'}`}>
                   <div className="text-sm font-medium text-zinc-100">{note.title}</div>
-                  <pre className="mt-2 whitespace-pre-wrap font-mono text-[12px] text-red-200">{note.message}</pre>
+                  <pre className="mt-2 whitespace-pre-wrap break-words font-mono text-[12px] text-red-200">{note.message}</pre>
                   <div className="mt-2 text-[11px] text-zinc-500">{timeAgo(note.createdAt)}</div>
                 </div>
               ))}

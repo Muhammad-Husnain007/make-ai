@@ -7,7 +7,7 @@ import { Server } from 'socket.io';
 import { listPullStates, presentIssue, shouldRunAgent } from '@pulse/agent';
 import { applyPullStates, createAdminNotification, createProject, getAgentPipeline, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentPipeline, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
 import { getUserByToken, loginUser, logoutToken, readBearerToken, registerUser, requestRegisterOtp, requestResetOtp, resetPassword, verifyRegisterOtp, verifyResetOtp } from './auth.js';
-import { acceptInvite, adminOverview, canAccessProject, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, isPlatformOwner, listAdminCompanies, listAdminNotifications, listTeam, markAdminNotificationRead, markAllAdminNotificationsRead, resendInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
+import { acceptInvite, adminOverview, canAccessProject, declineInvite, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, isPlatformOwner, listAdminCompanies, listAdminNotifications, listTeam, markAdminNotificationRead, markAllAdminNotificationsRead, removeMember, resendInvite, revokeInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
 import { enqueueScan, getQueueDashboard, isQueueEnabled, queueHealth, registerQueueBoard, startQueue } from './queue.js';
 import './db.js';
 
@@ -73,6 +73,15 @@ function presentForUser(user, issue) {
   return presentIssue(issue, { admin: isPlatformOwner(user?.email) });
 }
 
+async function forceLogoutSockets(userId) {
+  const io = app.io;
+  if (!io || !userId) return;
+  const room = `user:${userId}`;
+  io.to(room).emit('pulse:forced-logout', { reason: 'removed' });
+  const sockets = await io.in(room).fetchSockets();
+  for (const socket of sockets) socket.disconnect(true);
+}
+
 function emitToProject(project, event, payload) {
   for (const room of roomsForProject(project)) {
     app.io?.to(room).emit(event, payload);
@@ -117,6 +126,10 @@ app.addHook('preHandler', async (req, reply) => {
   if (!path.startsWith('/api/')) return;
   if (path === '/api/auth/login' || path.startsWith('/api/auth/register') || path.startsWith('/api/auth/reset')) return;
   if (req.method === 'GET' && /^\/api\/invites\/[^/]+$/.test(path)) return;
+  if (req.method === 'POST' && /^\/api\/invites\/[^/]+\/(accept|decline)$/.test(path)) {
+    req.user = getUserByToken(readBearerToken(req));
+    return;
+  }
   const user = getUserByToken(readBearerToken(req));
   if (!user) return reply.code(401).send({ error: 'Sign in required' });
   req.user = user;
@@ -156,7 +169,10 @@ app.post('/api/auth/login', authLimit, async (req, reply) => {
   try {
     return await loginUser(req.body || {});
   } catch (error) {
-    return reply.code(error.statusCode || 400).send({ error: error.message });
+    return reply.code(error.statusCode || 400).send({
+      error: error.message,
+      ...(error.inviteToken ? { inviteToken: error.inviteToken } : {}),
+    });
   }
 });
 
@@ -199,7 +215,18 @@ app.get('/api/invites/:token', async (req, reply) => {
 
 app.post('/api/invites/:token/accept', async (req, reply) => {
   try {
-    return { user: acceptInvite(req.params.token, req.user) };
+    return { user: acceptInvite(req.params.token, req.user || null) };
+  } catch (error) {
+    return reply.code(error.statusCode || 400).send({
+      error: error.message,
+      ...(error.needsRegister ? { needsRegister: true } : {}),
+    });
+  }
+});
+
+app.post('/api/invites/:token/decline', async (req, reply) => {
+  try {
+    return { invite: declineInvite(req.params.token) };
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -297,6 +324,24 @@ app.post('/api/team/invites/:id/resend', authLimit, async (req, reply) => {
       inviteId: req.params.id,
       origin: dashboardOrigin(req),
     });
+  } catch (error) {
+    return reply.code(error.statusCode || 400).send({ error: error.message });
+  }
+});
+
+app.delete('/api/team/members/:id', async (req, reply) => {
+  try {
+    const result = removeMember({ actor: req.user, userId: req.params.id });
+    await forceLogoutSockets(result.userId);
+    return result;
+  } catch (error) {
+    return reply.code(error.statusCode || 400).send({ error: error.message });
+  }
+});
+
+app.delete('/api/team/invites/:id', async (req, reply) => {
+  try {
+    return revokeInvite({ actor: req.user, inviteId: req.params.id });
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -444,6 +489,7 @@ const start = async () => {
   io.on('connection', (socket) => {
     const user = getUserByToken(socket.handshake.auth?.token || '');
     if (user) {
+      socket.join(`user:${user.id}`);
       for (const room of roomsForUser(user)) socket.join(room);
     }
     socket.emit('pulse:hello', { ok: true, ts: Date.now() });

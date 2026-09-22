@@ -2,6 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+:root {
+  color-scheme: dark;
+  --ink-950: 7 7 9;
+  --ink-900: 14 15 20;
+  --ink-800: 22 24 33;
+  --ink-700: 30 33 44;
+  --pulse-white: 255 255 255;
+  --z-100: 244 244 245;
+  --z-200: 228 228 231;
+  --z-300: 212 212 216;
+  --z-400: 161 161 170;
+  --z-500: 113 113 122;
+  --o-100: 255 237 213;
+  --o-200: 254 215 170;
+  --o-300: 253 186 116;
+  --r-200: 254 202 202;
+  --r-300: 252 165 165;
+  --e-300: 110 231 183;
+  --s-300: 125 211 252;
+  --a-100: 254 243 199;
+  --a-200: 253 230 138;
+}
+
+html.dark {
+  color-scheme: dark;
+}
+
+html.light {
+  color-scheme: light;
+  --ink-950: 246 242 236;
+  --ink-900: 255 253 250;
+  --ink-800: 243 237 228;
+  --ink-700: 232 224 213;
+  --pulse-white: 28 24 20;
+  --z-100: 28 24 20;
+  --z-200: 44 38 33;
+  --z-300: 68 60 52;
+  --z-400: 92 82 72;
+  --z-500: 122 111 98;
+  --o-100: 124 45 18;
+  --o-200: 154 52 18;
+  --o-300: 194 65 12;
+  --r-200: 153 27 27;
+  --r-300: 185 28 28;
+  --e-300: 4 120 87;
+  --s-300: 3 105 161;
+  --a-100: 120 53 15;
+  --a-200: 146 64 14;
+}
+
 @keyframes auth-from-right {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
@@ -11,7 +61,25 @@
 }
 
 html, body, #root { min-height: 100%; }
-body { background: #070709; }
+body {
+  background: rgb(var(--ink-950));
+  color: rgb(var(--z-100));
+  overflow-x: hidden;
+}
+
+html.light .text-ink-950 {
+  color: #1c1814;
+}
+
+html.light .rounded-2xl.border {
+  box-shadow: 0 1px 2px rgb(28 24 20 / 0.04), 0 10px 28px rgb(28 24 20 / 0.04);
+}
+
+html.light aside,
+html.light header {
+  border-color: rgb(28 24 20 / 0.08);
+}
 
 ::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-thumb { background: #2a2d3a; border-radius: 99px; }
+::-webkit-scrollbar-thumb { background: rgb(var(--z-500) / 0.45); border-radius: 99px; }
+html.light ::-webkit-scrollbar-thumb { background: rgb(28 24 20 / 0.18); }

@@ -36,7 +36,7 @@ export function ClientInfo() {
   ];
 
   return (
-    <section className="rounded-2xl border border-white/8 bg-ink-900 p-6">
+    <section className="rounded-2xl border border-white/8 bg-ink-900 p-4 sm:p-6">
       <h2 className="text-lg font-semibold tracking-tight">Client connection</h2>
       <p className="mt-1 mb-6 max-w-3xl text-sm text-zinc-500">This is what the client app last registered. Change the client `.env` and restart that app — this card updates without a Pulse restart.</p>
       <div className="grid gap-4 sm:grid-cols-2">

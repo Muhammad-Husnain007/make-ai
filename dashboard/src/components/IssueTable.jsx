@@ -1,17 +1,18 @@
 import { Link } from 'react-router-dom';
 import { timeAgo } from '../lib/time.js';
+import { issueStatus } from '../lib/issueStatus.js';
 import { PullLink } from './PullLink.jsx';
 import { StatusPill } from './StatusPill.jsx';
 
 export function IssueTable({ issues, empty = 'No issues yet.' }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-white/8">
-      <table className="w-full text-left text-sm">
+    <div className="overflow-x-auto rounded-2xl border border-white/8">
+      <table className="w-full min-w-[560px] text-left text-sm">
         <thead className="bg-ink-900 text-[11px] uppercase tracking-wider text-zinc-500">
           <tr>
             <th className="px-4 py-3">Issue</th>
             <th className="px-4 py-3">Status</th>
-            <th className="px-4 py-3">Users</th>
+            <th className="px-4 py-3" title="How many users this issue happened for">Users</th>
             <th className="px-4 py-3">Last seen</th>
           </tr>
         </thead>
@@ -31,8 +32,10 @@ export function IssueTable({ issues, empty = 'No issues yet.' }) {
                 </Link>
                 <PullLink url={issue.pr_url} className="mt-1 font-mono text-[11px]" />
               </td>
-              <td className="px-4 py-3"><StatusPill status={issue.status} /></td>
-              <td className="px-4 py-3 font-mono text-zinc-300">{issue.user_count}</td>
+              <td className="px-4 py-3"><StatusPill status={issueStatus(issue)} /></td>
+              <td className="px-4 py-3 font-mono text-zinc-100" title="Users affected">
+                {Number(issue.user_count || 0)}
+              </td>
               <td className="px-4 py-3 text-zinc-400">{timeAgo(issue.last_seen)}</td>
             </tr>
           ))}

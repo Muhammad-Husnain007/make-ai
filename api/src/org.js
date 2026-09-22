@@ -20,6 +20,16 @@ const stmts = {
     ORDER BY m.created_at ASC
   `),
   memberOf: db.prepare('SELECT * FROM company_members WHERE company_id = ? AND user_id = ?'),
+  deleteMember: db.prepare('DELETE FROM company_members WHERE company_id = ? AND user_id = ?'),
+  deleteUserSessions: db.prepare('DELETE FROM sessions WHERE user_id = ?'),
+  revokeInvite: db.prepare("UPDATE invitations SET status = 'revoked' WHERE id = ?"),
+  inviteById: db.prepare(`
+    SELECT i.*, u.name AS invited_by_name, u.email AS invited_by_email, c.name AS live_company_name
+    FROM invitations i
+    JOIN users u ON u.id = i.invited_by
+    LEFT JOIN companies c ON c.id = i.company_id
+    WHERE i.id = ?
+  `),
   members: db.prepare(`
     SELECT u.id, u.name, u.email, m.role, m.can_invite, m.created_at
     FROM company_members m
@@ -42,6 +52,14 @@ const stmts = {
     SELECT * FROM invitations
     WHERE email = ? AND kind = ? AND IFNULL(company_id, '') = IFNULL(?, '') AND status = 'pending'
   `),
+  pendingByEmail: db.prepare(`
+    SELECT * FROM invitations
+    WHERE email = ? AND status = 'pending' AND expires_at >= ?
+    ORDER BY CASE kind WHEN 'company' THEN 0 ELSE 1 END, created_at DESC
+    LIMIT 1
+  `),
+  userByEmail: db.prepare('SELECT id, name, email, created_at FROM users WHERE email = ?'),
+  declineInvite: db.prepare("UPDATE invitations SET status = 'declined' WHERE id = ?"),
   markAccepted: db.prepare("UPDATE invitations SET status = 'accepted' WHERE id = ?"),
   expireOld: db.prepare("UPDATE invitations SET status = 'expired' WHERE status = 'pending' AND expires_at < ?"),
   listCompanyInvites: db.prepare(`
@@ -192,8 +210,25 @@ function serializeInvite(row) {
     status,
     expiresAt: row.expires_at,
     createdAt: row.created_at,
+    registered: Boolean(stmts.userByEmail.get(normalizeEmail(row.email))),
     inviteUrl: `${String(process.env.DASHBOARD_URL || 'http://127.0.0.1:5173').replace(/\/$/, '')}/invite/${row.token}`,
   };
+}
+
+export function pendingInviteForEmail(email) {
+  stmts.expireOld.run(new Date().toISOString());
+  const row = stmts.pendingByEmail.get(normalizeEmail(email), new Date().toISOString());
+  return row || null;
+}
+
+export function declineInvite(token) {
+  stmts.expireOld.run(new Date().toISOString());
+  const row = stmts.inviteByToken.get(token);
+  if (!row) fail('Invitation not found.', 404);
+  if (row.status === 'declined') return serializeInvite({ ...row, status: 'declined' });
+  if (row.status !== 'pending') fail('This invitation can no longer be declined.', 400);
+  stmts.declineInvite.run(row.id);
+  return serializeInvite({ ...row, status: 'declined' });
 }
 
 export function getInvite(token) {
@@ -312,33 +347,70 @@ export async function inviteMember({ actor, email, origin, canInvite = false }) 
   return { invite: getInvite(token), ...delivery };
 }
 
+export function removeMember({ actor, userId }) {
+  const hydrated = hydrateUser(actor);
+  if (!hydrated?.canInviteMembers) fail('You cannot remove members.', 403);
+  const targetId = String(userId || '').trim();
+  if (!targetId) fail('Member not found.', 404);
+  if (targetId === actor.id) fail('You cannot remove yourself.', 400);
+  const companyId = hydrated.company.id;
+  const membership = stmts.memberOf.get(companyId, targetId);
+  if (!membership) fail('Member not found.', 404);
+  if (membership.role === 'owner') fail('The company owner cannot be removed.', 403);
+  stmts.deleteMember.run(companyId, targetId);
+  stmts.deleteUserSessions.run(targetId);
+  return { ok: true, userId: targetId };
+}
+
+export function revokeInvite({ actor, inviteId }) {
+  const hydrated = hydrateUser(actor);
+  const row = stmts.inviteById.get(inviteId);
+  if (!row) fail('Invitation not found.', 404);
+  if (row.status !== 'pending') fail('Only pending invitations can be cancelled.', 400);
+  if (row.kind === 'company' && !hydrated.platformOwner) fail('Only the Pulse owner can cancel company invitations.', 403);
+  if (row.kind === 'member') {
+    if (!hydrated.canInviteMembers || hydrated.company.id !== row.company_id) {
+      fail('You cannot cancel this invitation.', 403);
+    }
+  }
+  stmts.revokeInvite.run(row.id);
+  return { ok: true, inviteId: row.id };
+}
+
 export function acceptInvite(token, user) {
   const row = stmts.inviteByToken.get(token);
   if (!row) fail('Invitation not found.', 404);
+  if (user && normalizeEmail(user.email) !== normalizeEmail(row.email)) {
+    fail(`Sign in as ${row.email} to accept this invitation.`, 403);
+  }
+  const account = user || stmts.userByEmail.get(normalizeEmail(row.email));
+  if (!account) {
+    const err = new Error('Register with this email to accept this invitation.');
+    err.statusCode = 409;
+    err.needsRegister = true;
+    throw err;
+  }
   if (row.status === 'accepted') {
-    if (normalizeEmail(user.email) === normalizeEmail(row.email)) return hydrateUser(user);
+    if (normalizeEmail(account.email) === normalizeEmail(row.email)) return hydrateUser(account);
     fail('This invitation was already accepted.', 409);
   }
   if (row.status !== 'pending' || row.expires_at < new Date().toISOString()) fail('This invitation has expired.', 410);
-  if (normalizeEmail(user.email) !== normalizeEmail(row.email)) {
-    fail(`Sign in as ${row.email} to accept this invitation.`, 403);
-  }
   const now = new Date().toISOString();
   if (row.kind === 'company') {
-    if (stmts.memberships.all(user.id).length) fail('You already belong to a company.', 409);
+    if (stmts.memberships.all(account.id).length) fail('You already belong to a company.', 409);
     const companyId = nanoid();
     const companyName = String(row.company_name || 'Company').trim();
     stmts.insertCompany.run(companyId, companyName, now);
-    stmts.insertMember.run(companyId, user.id, 'owner', now, 1);
+    stmts.insertMember.run(companyId, account.id, 'owner', now, 1);
     if (row.company_address) stmts.setAddress.run(String(row.company_address).trim().slice(0, 200), companyId);
     createProject(companyName, row.email, companyId);
   } else {
     if (!row.company_id || !stmts.companyById.get(row.company_id)) fail('Company no longer exists.', 404);
-    if (stmts.memberOf.get(row.company_id, user.id)) fail('You are already a member of this company.', 409);
-    stmts.insertMember.run(row.company_id, user.id, 'member', now, row.can_invite ? 1 : 0);
+    if (stmts.memberOf.get(row.company_id, account.id)) fail('You are already a member of this company.', 409);
+    stmts.insertMember.run(row.company_id, account.id, 'member', now, row.can_invite ? 1 : 0);
   }
   stmts.markAccepted.run(row.id);
-  return hydrateUser(user);
+  return hydrateUser(account);
 }
 
 export function listTeam(actor) {

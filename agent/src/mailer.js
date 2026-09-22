@@ -45,7 +45,7 @@ export async function sendInviteEmail({ to, inviteUrl, companyName, kind, invite
       <h2 style="margin-bottom:8px">Pulse invitation</h2>
       <p>${escapeHtml(invitedBy || 'Pulse')} invited <strong>${escapeHtml(to)}</strong> to ${asOwner ? 'become the company owner of' : 'join'} <strong>${escapeHtml(companyName)}</strong>.</p>
       <p>${asOwner ? 'As owner you can set up the project, use the Pulse agent, and invite your company members.' : 'You will get access to this company dashboard.'}</p>
-      <p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#f97316;color:#111;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">Accept invitation</a></p>
+      <p><a href="${escapeHtml(inviteUrl)}" style="display:inline-block;background:#f97316;color:#111;padding:10px 16px;border-radius:8px;text-decoration:none;font-weight:600">View invitation</a></p>
       <p style="color:#6b7280;font-size:12px">If the button does not work, open this link:<br>${escapeHtml(inviteUrl)}</p>
     </div>
   `;
@@ -54,7 +54,7 @@ export async function sendInviteEmail({ to, inviteUrl, companyName, kind, invite
       from: { name: 'Pulse', address: fromAddress },
       to,
       subject,
-      text: `${intro}\n\nAccept invitation: ${inviteUrl}\n`,
+      text: `${intro}\n\nView invitation: ${inviteUrl}\n`,
       html,
     });
     return { ok: true, to, id: info.messageId };

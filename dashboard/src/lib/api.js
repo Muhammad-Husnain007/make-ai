@@ -22,11 +22,16 @@ export async function api(path, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== '/api/auth/login' && !path.startsWith('/api/auth/register') && !path.startsWith('/api/auth/reset') && !path.startsWith('/api/invites/')) {
     try { localStorage.removeItem('pulse_auth_token'); } catch {}
-    if (!['/login', '/register'].includes(window.location.pathname)) {
+    if (!['/login', '/register'].includes(window.location.pathname) && !window.location.pathname.startsWith('/invite/') && window.location.pathname !== '/register/thanks') {
       window.location.assign('/login');
     }
   }
-  if (!res.ok) throw new Error(data.error || `Request failed (${res.status})`);
+  if (!res.ok) {
+    const err = new Error(data.error || `Request failed (${res.status})`);
+    if (data.inviteToken) err.inviteToken = data.inviteToken;
+    if (data.needsRegister) err.needsRegister = true;
+    throw err;
+  }
   return data;
 }
 
@@ -41,6 +46,7 @@ export const logoutAccount = () => api('/api/auth/logout', { method: 'POST', bod
 export const getMe = () => api('/api/auth/me');
 export const getInvite = (token) => api(`/api/invites/${token}`);
 export const acceptInvite = (token) => api(`/api/invites/${token}/accept`, { method: 'POST', body: {} });
+export const declineInvite = (token) => api(`/api/invites/${token}/decline`, { method: 'POST', body: {} });
 export const getTeam = () => api('/api/team');
 export const getAdminOverview = () => api('/api/admin/overview');
 export const getAdminCompanies = () => api('/api/admin/companies');
@@ -49,6 +55,8 @@ export const patchAdminCompany = (id, body) => api(`/api/admin/companies/${id}`,
 export const inviteCompany = (body) => api('/api/team/companies/invite', { method: 'POST', body });
 export const inviteMember = (body) => api('/api/team/members/invite', { method: 'POST', body });
 export const resendInvite = (id) => api(`/api/team/invites/${id}/resend`, { method: 'POST', body: {} });
+export const removeMember = (id) => api(`/api/team/members/${id}`, { method: 'DELETE' });
+export const revokeInvite = (id) => api(`/api/team/invites/${id}`, { method: 'DELETE' });
 export const getProjects = () => api('/api/projects');
 export const createProject = (name, notifyEmail) => api('/api/projects', { method: 'POST', body: { name, notifyEmail } });
 export const patchProject = (id, body) => api(`/api/projects/${id}`, { method: 'PATCH', body });

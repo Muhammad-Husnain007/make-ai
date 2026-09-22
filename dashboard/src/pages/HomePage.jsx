@@ -19,10 +19,10 @@ function AdminHome({ refreshKey }) {
   }, [refreshKey]);
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Pulse admin</h1>
-      <p className="mt-1 mb-8 text-sm text-zinc-500">Platform overview for companies, pull-request billing, and account status.</p>
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+    <div className="p-4 sm:p-6 lg:p-8">
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Pulse admin</h1>
+      <p className="mt-1 mb-6 text-sm text-zinc-500 sm:mb-8">Platform overview for companies, pull-request billing, and account status.</p>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
         <StatCard label="Companies" value={overview?.companies ?? '—'} icon={<Building2 size={16} />} onClick={() => navigate('/companies')} />
         <StatCard label="Active companies" value={overview?.activeCompanies ?? '—'} icon={<Building2 size={16} />} />
         <StatCard label="Paused companies" value={overview?.pausedCompanies ?? '—'} icon={<PauseCircle size={16} />} />
@@ -48,9 +48,9 @@ export function HomePage({ refreshKey }) {
   if (user?.platformOwner) return <AdminHome refreshKey={refreshKey} />;
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Pulse</h1>
-      <p className="mt-1 mb-8 text-sm text-zinc-500">Open issues, pull requests, performance, and memory leaks from connected clients.</p>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Pulse</h1>
+      <p className="mt-1 mb-6 text-sm text-zinc-500 sm:mb-8">Open issues, pull requests, performance, and memory leaks from connected clients.</p>
       {!user?.platformOwner && !user?.company && (
         <div className="mb-8 rounded-2xl border border-orange-400/20 bg-orange-500/5 p-5 text-sm text-zinc-300">
           Waiting for a Pulse invitation. The Pulse owner sends a company invite to your email. After you accept, you own that dashboard and can invite your members.
@@ -59,7 +59,7 @@ export function HomePage({ refreshKey }) {
 
       <div className="mb-10">
         <h2 className="mb-4 text-sm font-semibold">Open issues</h2>
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
           {ISSUE_VIEWS.map((item) => (
             <StatCard
               key={item.id}
@@ -78,7 +78,7 @@ export function HomePage({ refreshKey }) {
             key={item.id}
             type="button"
             onClick={() => navigate(item.to)}
-            className="flex items-center justify-between gap-4 rounded-2xl border border-white/8 bg-ink-900 px-6 py-8 text-left transition hover:border-white/20"
+            className="flex items-center justify-between gap-3 rounded-2xl border border-white/8 bg-ink-900 px-4 py-5 text-left transition hover:border-white/20 sm:gap-4 sm:px-6 sm:py-8"
           >
             <div className="flex items-start gap-4">
               <span className="mt-0.5 flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-white/5 text-zinc-200">

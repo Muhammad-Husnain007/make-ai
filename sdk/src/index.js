@@ -15,6 +15,31 @@ function serializeError(error) {
   };
 }
 
+function browserAnonymousId() {
+  if (typeof window === 'undefined') return '';
+  try {
+    const key = 'pulse_anon_id';
+    let id = localStorage.getItem(key);
+    if (!id) {
+      id = `anon:${globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2, 12)}`;
+      localStorage.setItem(key, id);
+    }
+    return id;
+  } catch {
+    return '';
+  }
+}
+
+function normalizeUser(user) {
+  const raw = user && typeof user === 'object' ? user : {};
+  const id = String(raw.id || raw._id || '').trim();
+  const email = String(raw.email || '').trim();
+  const ip = String(raw.ip || '').trim();
+  const stable = id || email || (ip ? `anon:${ip}` : browserAnonymousId());
+  if (!stable) return { ...raw, id: '', email, ip };
+  return { ...raw, id: stable, email, ip };
+}
+
 function safeJson(value) {
   try {
     return JSON.parse(JSON.stringify(value));
@@ -85,7 +110,7 @@ export function createPulseClient(options = {}) {
       url: typeof location !== 'undefined' ? location.href : extra.url || '',
       environment: state.environment,
       release: state.release,
-      user: extra.user || state.user,
+      user: normalizeUser(extra.user || state.user),
       tags: { ...state.tags, ...(extra.tags || {}) },
       breadcrumbs: [...state.breadcrumbs],
       extra: safeJson(extra.extra) || {},
@@ -190,7 +215,7 @@ export function createPulseClient(options = {}) {
     captureException,
     captureMessage,
     setUser(user) {
-      state.user = user || {};
+      state.user = normalizeUser(user);
     },
     setTag(key, value) {
       state.tags[key] = value;

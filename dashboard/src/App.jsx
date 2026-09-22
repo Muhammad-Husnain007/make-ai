@@ -8,7 +8,7 @@ import { InvitePage } from './pages/InvitePage.jsx';
 import { IssueDetail } from './pages/IssueDetail.jsx';
 import { IssuesPage } from './pages/IssuesPage.jsx';
 import { JobsPage } from './pages/JobsPage.jsx';
-import { LoginPage, RegisterPage } from './pages/AuthPages.jsx';
+import { LoginPage, RegisterPage, RegisterThanksPage } from './pages/AuthPages.jsx';
 import { CompaniesPage } from './pages/CompaniesPage.jsx';
 import { CompanyDetail } from './pages/CompanyDetail.jsx';
 import { NotificationsPage } from './pages/NotificationsPage.jsx';
@@ -18,7 +18,7 @@ import { getAdminNotifications } from './lib/api.js';
 
 function Protected({ children }) {
   const { user, ready } = useAuth();
-  if (!ready) return <div className="flex min-h-screen items-center justify-center bg-ink-950 text-sm text-zinc-500">Loading…</div>;
+  if (!ready) return <div className="flex min-h-screen items-center justify-center bg-ink-950 px-4 text-sm text-zinc-500">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
   return children;
 }
@@ -82,6 +82,7 @@ export default function App() {
     <AuthProvider>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register/thanks" element={<RegisterThanksPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/invite/:token" element={<InvitePage />} />
         <Route path="*" element={<Protected><AuthedApp /></Protected>} />

@@ -55,9 +55,9 @@ export function CompaniesPage() {
   if (!user?.platformOwner) return null;
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Companies</h1>
-      <p className="mt-1 mb-8 max-w-3xl text-sm text-zinc-500">Invite a company by email. That person becomes owner of their dashboard. Click a company for billing and pause controls.</p>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Companies</h1>
+      <p className="mt-1 mb-6 max-w-3xl text-sm text-zinc-500 sm:mb-8">Invite a company by email. That person becomes owner of their dashboard. Click a company for billing and pause controls.</p>
 
       <form onSubmit={onInvite} className="mb-8 space-y-3 rounded-2xl border border-white/5 bg-ink-900 p-5">
         <div className="grid gap-3 md:grid-cols-3">
@@ -65,7 +65,7 @@ export function CompaniesPage() {
           <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" placeholder="Owner email" className="h-11 rounded-lg border border-white/10 bg-ink-800 px-3 text-sm" />
           <input value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Address (optional)" className="h-11 rounded-lg border border-white/10 bg-ink-800 px-3 text-sm" />
         </div>
-        <button disabled={busy} className="h-11 rounded-lg bg-orange-500 px-4 text-sm font-medium text-ink-950 disabled:opacity-50">
+        <button disabled={busy} className="h-11 w-full rounded-lg bg-orange-500 px-4 text-sm font-medium text-ink-950 disabled:opacity-50 sm:w-auto">
           {busy ? 'Sending…' : 'Send invitation'}
         </button>
       </form>
@@ -75,8 +75,8 @@ export function CompaniesPage() {
 
       <section className="mb-8">
         <h2 className="mb-3 text-sm font-semibold">All companies</h2>
-        <div className="overflow-hidden rounded-2xl border border-white/5">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto rounded-2xl border border-white/5">
+          <table className="w-full min-w-[720px] text-left text-sm">
             <thead className="bg-ink-900 text-[11px] uppercase tracking-wider text-zinc-500">
               <tr>
                 <th className="px-4 py-3">Company</th>
@@ -118,8 +118,8 @@ export function CompaniesPage() {
 
       <section>
         <h2 className="mb-3 text-sm font-semibold">Invitations</h2>
-        <div className="overflow-hidden rounded-2xl border border-white/5">
-          <table className="w-full text-left text-sm">
+        <div className="overflow-x-auto rounded-2xl border border-white/5">
+          <table className="w-full min-w-[560px] text-left text-sm">
             <thead className="bg-ink-900 text-[11px] uppercase tracking-wider text-zinc-500">
               <tr>
                 <th className="px-4 py-3">Email</th>

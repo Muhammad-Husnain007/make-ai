@@ -44,14 +44,14 @@ export function JobsPage({ refreshKey }) {
   const selected = data?.queues?.find((item) => item.name === queueName) || data?.queues?.[0];
 
   return (
-    <div className="p-8">
-      <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Jobs</h1>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Jobs</h1>
           <p className="mt-1 text-sm text-zinc-500">BullMQ background jobs for scan, fix, pull requests, and invitation emails.</p>
         </div>
         {data?.enabled && (
-          <button type="button" onClick={openBoard} className="h-10 rounded-lg bg-orange-500 px-4 text-sm font-medium text-ink-950">
+          <button type="button" onClick={openBoard} className="h-10 w-full rounded-lg bg-orange-500 px-4 text-sm font-medium text-ink-950 sm:w-auto">
             Open queue dashboard
           </button>
         )}
@@ -70,7 +70,7 @@ export function JobsPage({ refreshKey }) {
       </div>
       {data?.redisError && <div className="mb-4 text-sm text-red-300">{data.redisError}</div>}
 
-      <div className="mb-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
         {(data?.queues || Object.keys(QUEUE_LABELS).map((name) => ({ name, counts: {} }))).map((queue) => (
           <button
             key={queue.name}
@@ -89,11 +89,11 @@ export function JobsPage({ refreshKey }) {
         ))}
       </div>
 
-      <section className="overflow-hidden rounded-2xl border border-white/5">
+      <section className="overflow-x-auto rounded-2xl border border-white/5">
         <div className="flex items-center gap-2 bg-ink-900 px-4 py-3 text-sm font-medium">
           <ListTodo size={16} /> {QUEUE_LABELS[selected?.name] || 'Jobs'}
         </div>
-        <table className="w-full text-left text-sm">
+        <table className="w-full min-w-[560px] text-left text-sm">
           <thead className="bg-ink-900 text-[11px] uppercase tracking-wider text-zinc-500">
             <tr>
               <th className="px-4 py-2">Job</th>

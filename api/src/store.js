@@ -55,9 +55,38 @@ const stmts = {
     )
   `),
   distinctUsers: db.prepare(`
-    SELECT COUNT(DISTINCT json_extract(user_json, '$.id')) AS n
+    SELECT COUNT(*) AS n FROM (
+      SELECT DISTINCT COALESCE(
+        nullif(json_extract(user_json, '$.id'), ''),
+        nullif(json_extract(user_json, '$.email'), ''),
+        CASE
+          WHEN json_extract(user_json, '$.ip') IS NOT NULL AND json_extract(user_json, '$.ip') != ''
+          THEN 'anon:' || json_extract(user_json, '$.ip')
+        END
+      ) AS k
+      FROM events
+      WHERE issue_id = ?
+    ) WHERE k IS NOT NULL AND k != ''
+  `),
+  listAffectedUsers: db.prepare(`
+    SELECT
+      COALESCE(
+        nullif(json_extract(user_json, '$.id'), ''),
+        nullif(json_extract(user_json, '$.email'), ''),
+        CASE
+          WHEN json_extract(user_json, '$.ip') IS NOT NULL AND json_extract(user_json, '$.ip') != ''
+          THEN 'anon:' || json_extract(user_json, '$.ip')
+        END
+      ) AS id,
+      MAX(json_extract(user_json, '$.email')) AS email,
+      COUNT(*) AS events,
+      MAX(timestamp) AS last_seen
     FROM events
-    WHERE issue_id = ? AND json_extract(user_json, '$.id') IS NOT NULL
+    WHERE issue_id = ?
+    GROUP BY 1
+    HAVING id IS NOT NULL AND id != ''
+    ORDER BY events DESC, last_seen DESC
+    LIMIT 50
   `),
   setUserCount: db.prepare('UPDATE issues SET user_count = ? WHERE id = ?'),
   getIssue: db.prepare(`
@@ -364,6 +393,23 @@ export function applyPullStates(pulls = []) {
 
 export function listIssues({ projectId, projectIds, status, environment, q, limit = 80 } = {}) {
   resolveFinishedFixes();
+  db.prepare(`
+    UPDATE issues
+    SET user_count = (
+      SELECT COUNT(*) FROM (
+        SELECT DISTINCT COALESCE(
+          nullif(json_extract(e.user_json, '$.id'), ''),
+          nullif(json_extract(e.user_json, '$.email'), ''),
+          CASE
+            WHEN json_extract(e.user_json, '$.ip') IS NOT NULL AND json_extract(e.user_json, '$.ip') != ''
+            THEN 'anon:' || json_extract(e.user_json, '$.ip')
+          END
+        ) AS k
+        FROM events e
+        WHERE e.issue_id = issues.id
+      ) WHERE k IS NOT NULL AND k != ''
+    )
+  `).run();
   const clauses = [];
   const params = [];
   if (projectId) {
@@ -421,6 +467,13 @@ export function getIssue(id) {
   const issue = stmts.getIssue.get(id);
   if (!issue) return null;
   const events = stmts.listEvents.all(id, 40).map(serializeEvent);
+  const affectedUsers = stmts.listAffectedUsers.all(id).map((row) => ({
+    id: row.id,
+    email: row.email || '',
+    events: Number(row.events || 0),
+    lastSeen: row.last_seen,
+  }));
+  stmts.setUserCount.run(affectedUsers.length, id);
   const since = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const hourly = db.prepare(`
     SELECT strftime('%Y-%m-%dT%H:00:00.000Z', timestamp) AS hour, COUNT(*) AS count
@@ -429,7 +482,7 @@ export function getIssue(id) {
     GROUP BY hour
     ORDER BY hour
   `).all(id, since);
-  return { ...issue, events, hourly };
+  return { ...stmts.getIssue.get(id), events, hourly, affectedUsers, user_count: affectedUsers.length };
 }
 
 export function setIssueStatus(id, status) {
@@ -488,9 +541,18 @@ export function stats(projectId, projectIds) {
   const closedPull = db.prepare(`SELECT COUNT(*) AS n FROM issues WHERE IFNULL(pr_closed, 0) = 1 ${scope}`).get(...scopeParams);
   const events24h = db.prepare(`SELECT COUNT(*) AS n FROM events WHERE timestamp >= ? ${eventScope}`).get(...eventParams);
   const users24h = db.prepare(`
-    SELECT COUNT(DISTINCT json_extract(user_json, '$.id')) AS n
-    FROM events
-    WHERE timestamp >= ? AND json_extract(user_json, '$.id') IS NOT NULL ${eventScope}
+    SELECT COUNT(*) AS n FROM (
+      SELECT DISTINCT COALESCE(
+        nullif(json_extract(user_json, '$.id'), ''),
+        nullif(json_extract(user_json, '$.email'), ''),
+        CASE
+          WHEN json_extract(user_json, '$.ip') IS NOT NULL AND json_extract(user_json, '$.ip') != ''
+          THEN 'anon:' || json_extract(user_json, '$.ip')
+        END
+      ) AS k
+      FROM events
+      WHERE timestamp >= ? ${eventScope}
+    ) WHERE k IS NOT NULL AND k != ''
   `).get(...eventParams);
   const series = db.prepare(`
     SELECT strftime('%Y-%m-%dT%H:00:00.000Z', timestamp) AS hour, COUNT(*) AS count
@@ -520,6 +582,15 @@ export function stats(projectId, projectIds) {
   };
 }
 
+function normalizeEventUser(user) {
+  const raw = user && typeof user === 'object' ? user : {};
+  const id = String(raw.id || raw._id || '').trim();
+  const email = String(raw.email || '').trim();
+  const ip = String(raw.ip || '').trim();
+  const stable = id || email || (ip ? `anon:${ip}` : '');
+  return { ...raw, id: stable, email, ip };
+}
+
 export function ingestEvent(publicKey, rawBody) {
   const project = stmts.projectByKey.get(publicKey);
   if (!project) {
@@ -540,7 +611,8 @@ export function ingestEvent(publicKey, rawBody) {
   const fingerprint = fingerprintEvent({ type, message: body.message, stack: body.stack });
   const culprit = culpritFromStack(body.stack);
   const title = `${type}: ${body.message}`.slice(0, 240);
-  const userId = body.user?.id ? 1 : 0;
+  const user = normalizeEventUser(body.user);
+  const hasUser = Boolean(user.id);
 
   const result = db.transaction(() => {
     let isNew = false;
@@ -558,7 +630,7 @@ export function ingestEvent(publicKey, rawBody) {
         level,
         status: 'open',
         count: 1,
-        user_count: userId,
+        user_count: hasUser ? 1 : 0,
         first_seen: seen,
         last_seen: seen,
       };
@@ -570,7 +642,7 @@ export function ingestEvent(publicKey, rawBody) {
         culprit,
         type,
         level,
-        user_count: userId,
+        user_count: hasUser ? 1 : 0,
         seen,
       });
     } else {
@@ -590,7 +662,7 @@ export function ingestEvent(publicKey, rawBody) {
       url: body.url || '',
       environment: body.environment || 'production',
       release_name: body.release || '',
-      user_json: JSON.stringify(body.user || {}),
+      user_json: JSON.stringify(user),
       tags_json: JSON.stringify(body.tags || {}),
       breadcrumbs_json: JSON.stringify(body.breadcrumbs || []),
       extra_json: JSON.stringify(body.extra || {}),

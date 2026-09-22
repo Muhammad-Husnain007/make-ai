@@ -34,9 +34,9 @@ ISENABLEDSENDEMAIL=true
 "start": "node --import @pulse/sdk/register src/server.js"`;
 
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold tracking-tight">Setup</h1>
-      <p className="mt-1 mb-8 max-w-3xl text-sm text-zinc-500">Pulse is the SaaS. Copy the DSN into the client app, and let that app tell Pulse its GitHub repo, base branch, and PR email.</p>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Setup</h1>
+      <p className="mt-1 mb-6 max-w-3xl text-sm text-zinc-500 sm:mb-8">Pulse is the SaaS. Copy the DSN into the client app, and let that app tell Pulse its GitHub repo, base branch, and PR email.</p>
 
       <div className="mb-6 grid gap-4 md:grid-cols-2">
         <div className="rounded-2xl border border-white/8 bg-ink-900 p-5 text-sm">
@@ -51,7 +51,7 @@ ISENABLEDSENDEMAIL=true
         </div>
       </div>
 
-      <pre className="mb-8 overflow-auto rounded-2xl border border-white/8 bg-ink-900 p-5 font-mono text-[12px] leading-relaxed text-zinc-300">{snippet}</pre>
+      <pre className="mb-8 overflow-auto rounded-2xl border border-white/8 bg-ink-900 p-4 font-mono text-[12px] leading-relaxed text-zinc-300 sm:p-5">{snippet}</pre>
 
       <ClientInfo />
     </div>

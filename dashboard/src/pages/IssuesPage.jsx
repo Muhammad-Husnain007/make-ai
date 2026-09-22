@@ -49,16 +49,16 @@ export function IssuesPage({ refreshKey, view = 'open' }) {
   }, [view, qDebounced]);
 
   return (
-    <div className="p-8">
-      <div className="mb-8 flex items-end justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">{currentView.label}</h1>
+    <div className="p-4 sm:p-6 lg:p-8">
+      <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{currentView.label}</h1>
           <p className="mt-1 text-sm text-zinc-500">{currentView.blurb || 'Grouped production exceptions, live-updated.'}</p>
         </div>
-        <div className="flex gap-2">
-          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title or culprit" className="h-10 w-64 rounded-lg border border-white/10 bg-ink-800 px-3 text-sm outline-none focus:border-orange-400/50" />
+        <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+          <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search title or culprit" className="h-10 w-full rounded-lg border border-white/10 bg-ink-800 px-3 text-sm outline-none focus:border-orange-400/50 sm:w-64" />
           {!isCategory && (
-          <select value={view} onChange={(e) => navigate(viewPath(e.target.value))} className="h-10 rounded-lg border border-white/10 bg-ink-800 px-3 text-sm">
+          <select value={view} onChange={(e) => navigate(viewPath(e.target.value))} className="h-10 w-full rounded-lg border border-white/10 bg-ink-800 px-3 text-sm sm:w-auto">
             {DROPDOWN_VIEWS.map((item) => (
               <option key={item.id} value={item.id}>
                 {item.label} ({stats?.[item.stat] ?? 0})
@@ -70,7 +70,7 @@ export function IssuesPage({ refreshKey, view = 'open' }) {
       </div>
 
       {!isCategory && (
-      <div className="mb-8 grid grid-cols-4 gap-4">
+      <div className="mb-6 grid grid-cols-1 gap-3 sm:mb-8 sm:grid-cols-2 sm:gap-4 lg:grid-cols-4">
         {ISSUE_VIEWS.map((item) => (
           <StatCard
             key={item.id}

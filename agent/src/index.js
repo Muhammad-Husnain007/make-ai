@@ -1,4 +1,4 @@
-export { CLIENT_MAINTENANCE_MESSAGE, presentIssue } from './clientView.js';
+export { CLIENT_MAINTENANCE_MESSAGE, issueLifecycle, presentIssue } from './clientView.js';
 export {
   canContinueToFix,
   finalizeAgent,

@@ -1,5 +1,18 @@
 import { addBreadcrumb, captureException } from './index.js';
 
+export function userFromRequest(req) {
+  if (!req) return {};
+  const forwarded = String(req.headers?.['x-forwarded-for'] || '');
+  const ip = String(req.ip || forwarded.split(',')[0] || req.socket?.remoteAddress || '').trim();
+  const auth = req.user;
+  const authId = String(auth?.id || auth?._id || '').trim();
+  const email = String(auth?.email || '').trim();
+  if (authId) return { id: authId, email, ip };
+  if (email) return { id: email, email, ip };
+  if (ip) return { id: `anon:${ip}`, ip };
+  return {};
+}
+
 function statusOf(err) {
   return Number(err?.statusCode || err?.status || 500);
 }
@@ -18,9 +31,7 @@ function wrapErrorMiddleware(fn) {
       captureException(err, {
         url: req.originalUrl || req.url || '',
         extra: { method: req.method, status: httpStatus },
-        user: req.user
-          ? { id: String(req.user.id || req.user._id || ''), email: req.user.email }
-          : undefined,
+        user: userFromRequest(req),
       });
     };
 

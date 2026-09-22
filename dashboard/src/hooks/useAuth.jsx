@@ -45,6 +45,11 @@ export function AuthProvider({ children }) {
     },
     async login(form) {
       const data = await loginAccount(form);
+      if (!data.token) {
+        clearToken();
+        setUser(null);
+        return data;
+      }
       setToken(data.token);
       setUser(data.user);
       return data;

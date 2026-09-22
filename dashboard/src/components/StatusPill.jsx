@@ -1,13 +1,13 @@
 const statusClass = {
-  open: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  resolved: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  ignored: 'bg-zinc-500/15 text-zinc-400 border-zinc-500/30',
+  pending: 'bg-amber-500/15 text-amber-200 border-amber-500/30',
+  resolved: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
+  merged: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
 };
 
 export function StatusPill({ status }) {
-  const value = status || 'open';
+  const value = status === 'resolved' || status === 'merged' ? status : 'pending';
   return (
-    <span className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusClass[value] || statusClass.open}`}>
+    <span className={`rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${statusClass[value]}`}>
       {value}
     </span>
   );
