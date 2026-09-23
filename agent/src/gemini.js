@@ -2,7 +2,7 @@ import { GoogleGenAI } from '@google/genai';
 import { isSecretPath, maskContextFile, publicSecretLabel, redactText, sanitizeIssuePayload } from './secrets.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-const isRetryableAi = (error) => /UNAVAILABLE|503|high demand|RESOURCE_EXHAUSTED|429|overloaded/i.test(error?.message || String(error || ''));
+export const isRetryableAi = (error) => /UNAVAILABLE|503|high demand|RESOURCE_EXHAUSTED|429|overloaded/i.test(error?.message || String(error || ''));
 const isMissingModel = (error) => /NOT_FOUND|404|not found|no longer available/i.test(error?.message || String(error || ''));
 
 function parseJsonObject(raw) {
@@ -60,18 +60,23 @@ async function generateJson(prompt) {
       lastError = error;
       if (isMissingModel(error)) continue;
       if (isRetryableAi(error)) {
-        await sleep(800);
-        try {
-          const response = await ai.models.generateContent({
-            model,
-            contents: prompt,
-            config: { responseMimeType: 'application/json' },
-          });
-          return parseJsonObject(response.text || '');
-        } catch (retryError) {
-          lastError = retryError;
-          if (isMissingModel(retryError)) continue;
+        let retryable = true;
+        for (const wait of [1500, 4000]) {
+          if (!retryable) break;
+          await sleep(wait);
+          try {
+            const response = await ai.models.generateContent({
+              model,
+              contents: prompt,
+              config: { responseMimeType: 'application/json' },
+            });
+            return parseJsonObject(response.text || '');
+          } catch (retryError) {
+            lastError = retryError;
+            if (isMissingModel(retryError) || !isRetryableAi(retryError)) retryable = false;
+          }
         }
+        if (isMissingModel(lastError)) continue;
       }
     }
   }

@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { adviseSecretIssue, analyzeWithGemini, reviewFixWithGemini } from './gemini.js';
+import { adviseSecretIssue, analyzeWithGemini, isRetryableAi, reviewFixWithGemini } from './gemini.js';
 import { createFixPullRequest, gatherGithubContext, loadRelatedTestFiles } from './github.js';
 import { emailFixReport, resolveNotifyEmail } from './mailer.js';
 import { applyAiFilePatch, fallbackIssueFix, githubAlreadyHasFix } from './source.js';
@@ -330,9 +330,13 @@ export async function scanIssue({ issue, event, project, logger, store }) {
         agentError = error.message || 'AI analysis failed';
         analysis = {
           ...analysis,
-          summary: `Gemini could not complete the analysis: ${agentError}`,
+          summary: isRetryableAi(error)
+            ? 'The AI model is busy. Click Run AI fix to try again.'
+            : 'Gemini could not complete the analysis.',
           rootCause: issue.title,
-          solution: 'Review the stack trace on the client base branch and re-run the agent after the model is available.',
+          solution: isRetryableAi(error)
+            ? 'Click Run AI fix to retry when the model is available.'
+            : 'Review the stack trace on the client base branch and re-run the agent after the model is available.',
         };
         analysis = attachSecretGuidance(analysis, secretFiles, issue);
         logger?.error?.({ err: error }, 'Pulse AI analysis failed');
