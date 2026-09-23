@@ -1,65 +1,3 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { spawnSync } from 'node:child_process';
-
-const SKIP = new Set(['node_modules', '.git', 'dist', 'data', 'coverage', '.cursor']);
-const SOURCE_EXT = /\.(?:js|jsx|mjs|cjs)$/i;
-
-function walkSourceFiles(dir, out = []) {
-  let entries = [];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const entry of entries) {
-    if (SKIP.has(entry.name) || entry.name.startsWith('.')) continue;
-    const abs = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (out.length > 80) return out;
-      walkSourceFiles(abs, out);
-    } else if (SOURCE_EXT.test(entry.name)) {
-      out.push(abs);
-    }
-  }
-  return out;
-}
-
-export function clientScanRoot(repoRoot, { release, cwd } = {}) {
-  const fromRelease = String(release || '').split('@')[0].trim();
-  const candidates = [
-    cwd,
-    fromRelease ? path.join(repoRoot, fromRelease) : '',
-    path.join(repoRoot, 'shop-api'),
-  ].filter(Boolean);
-  for (const dir of candidates) {
-    const src = path.join(dir, 'src');
-    if (fs.existsSync(src) && fs.statSync(src).isDirectory()) return dir;
-  }
-  return repoRoot;
-}
-
-export function findStackLocalFiles(repoRoot, { stack, culprit, extra, release } = {}) {
-  const scanRoot = clientScanRoot(repoRoot, { release, cwd: extra?.cwd });
-  const text = [stack, culprit, extra?.main, extra?.cwd].filter(Boolean).join('\n');
-  const matches = String(text).match(/(?:file:\/\/\/)?(?:[A-Za-z]:)?[^\s)'"]+\.(?:js|jsx|mjs|cjs)/gi) || [];
-  const files = [];
-  for (const raw of matches) {
-    const cleaned = raw
-      .replace(/^file:\/\//i, '')
-      .replace(/\\/g, '/')
-      .replace(/:\d+:\d+$/, '');
-    const srcIndex = cleaned.toLowerCase().lastIndexOf('/src/');
-    const relInside = srcIndex >= 0 ? cleaned.slice(srcIndex + 1) : path.posix.basename(cleaned);
-    const abs = path.join(scanRoot, relInside);
-    if (!fs.existsSync(abs) || !fs.statSync(abs).isFile()) continue;
-    const rel = path.relative(repoRoot, abs).replace(/\\/g, '/');
-    if (!rel || rel.startsWith('..') || files.some((file) => file.path === rel)) continue;
-    files.push({ path: rel, abs, contents: fs.readFileSync(abs, 'utf8') });
-  }
-  return files;
-}
-
 export function fallbackReferenceErrorFix(issue, contextFiles) {
   const missing = String(issue?.title || issue?.message || '').match(/ReferenceError:\s+([A-Za-z_$][\w$]*) is not defined/)?.[1];
   if (!missing) return [];
@@ -222,29 +160,6 @@ export function githubAlreadyHasFix(issue, contextFiles, analysis) {
   return false;
 }
 
-export function findLocalParseErrors(repoRoot, { release, cwd } = {}) {
-  const scanRoot = clientScanRoot(repoRoot, { release, cwd });
-  const files = walkSourceFiles(path.join(scanRoot, 'src'));
-  const broken = [];
-  for (const abs of files) {
-    const checked = spawnSync(process.execPath, ['--check', abs], {
-      encoding: 'utf8',
-      timeout: 4000,
-    });
-    if (checked.status === 0) continue;
-    const rel = path.relative(repoRoot, abs).replace(/\\/g, '/');
-    if (!rel || rel.startsWith('..')) continue;
-    broken.push({
-      path: rel,
-      abs,
-      contents: fs.readFileSync(abs, 'utf8'),
-      detail: String(checked.stderr || checked.stdout || '').slice(0, 800),
-    });
-    if (broken.length >= 4) break;
-  }
-  return broken;
-}
-
 function detectEol(text) {
   return String(text || '').includes('\r\n') ? '\r\n' : '\n';
 }
@@ -354,13 +269,4 @@ export function applyAiFilePatch(original, aiFile) {
   const full = aiFile?.contents ?? aiFile?.content;
   if (full) return mergeMinimally(source, String(full));
   return null;
-}
-
-export function applyLocalFiles(repoRoot, files) {
-  for (const file of files) {
-    const abs = path.resolve(repoRoot, file.path);
-    if (!abs.startsWith(path.resolve(repoRoot))) continue;
-    fs.mkdirSync(path.dirname(abs), { recursive: true });
-    fs.writeFileSync(abs, file.contents, 'utf8');
-  }
 }

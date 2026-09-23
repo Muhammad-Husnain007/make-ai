@@ -134,7 +134,7 @@ async function readGithubFile(target, path, sha) {
   }
 }
 
-export async function gatherGithubContext({ stack, culprit, release, extra, url, localFiles = [], github } = {}) {
+export async function gatherGithubContext({ stack, culprit, release, extra, url, github } = {}) {
   const target = await resolveGithubRepo(github);
   if (!target.ok) return { ...target, files: [] };
   const tree = await listSourceFiles(target);
@@ -154,19 +154,13 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
     if (hit && !matched.includes(hit.path) && !isSecretPath(hit.path)) matched.push(hit.path);
     if (matched.length >= 4) break;
   }
-  for (const local of localFiles) {
-    if (local.path && !matched.includes(local.path) && !isSecretPath(local.path)) matched.push(local.path);
-  }
   const files = (await Promise.all(matched.map(async (filePath) => {
-    const local = localFiles.find((item) => item.path === filePath);
-    const githubContents = await readGithubFile(target, filePath, byPath.get(filePath)?.sha);
-    const contents = local?.contents || githubContents;
-    if (!contents || isSecretPath(filePath) || /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(contents) || /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(githubContents || '')) return null;
+    const contents = await readGithubFile(target, filePath, byPath.get(filePath)?.sha);
+    if (!contents || isSecretPath(filePath) || /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(contents)) return null;
     return {
       path: filePath,
       contents,
-      githubContents: githubContents || contents,
-      fromLocal: Boolean(local),
+      githubContents: contents,
     };
   }))).filter(Boolean);
   const unmatchedReason = files.length

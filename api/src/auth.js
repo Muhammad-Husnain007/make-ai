@@ -110,12 +110,7 @@ function createSession(userId) {
   return token;
 }
 
-const LOCAL_OTP = '123456';
 const OTP_MS = 10 * 60 * 1000;
-
-function isLocalRuntime() {
-  return process.env.NODE_ENV !== 'production';
-}
 
 function hashOtp(email, otp) {
   return createHash('sha256').update(`${email}:${otp}`).digest('hex');
@@ -135,8 +130,7 @@ export async function requestRegisterOtp({ name, email }) {
     err.statusCode = 409;
     throw err;
   }
-  const local = isLocalRuntime();
-  const otp = local ? LOCAL_OTP : String(randomInt(0, 1_000_000)).padStart(6, '0');
+  const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const now = new Date();
   stmts.upsertOtp.run(
     cleanEmail,
@@ -145,15 +139,13 @@ export async function requestRegisterOtp({ name, email }) {
     new Date(now.getTime() + OTP_MS).toISOString(),
     now.toISOString(),
   );
-  if (!local) {
-    const mailed = await sendOtpEmail({ to: cleanEmail, otp });
-    if (!mailed.ok) {
-      const err = new Error(mailed.reason || 'Could not send the verification email.');
-      err.statusCode = 502;
-      throw err;
-    }
+  const mailed = await sendOtpEmail({ to: cleanEmail, otp });
+  if (!mailed.ok) {
+    const err = new Error(mailed.reason || 'Could not send the verification email.');
+    err.statusCode = 502;
+    throw err;
   }
-  return { ok: true, local, email: cleanEmail };
+  return { ok: true, email: cleanEmail };
 }
 
 export function verifyRegisterOtp({ email, otp }) {
@@ -165,8 +157,7 @@ export function verifyRegisterOtp({ email, otp }) {
     err.statusCode = 400;
     throw err;
   }
-  const localOk = isLocalRuntime() && code === LOCAL_OTP;
-  if (!localOk && !otpMatches(cleanEmail, code, row.otp_hash)) {
+  if (!otpMatches(cleanEmail, code, row.otp_hash)) {
     const err = new Error('Enter a valid verification code.');
     err.statusCode = 400;
     throw err;
@@ -183,8 +174,7 @@ function requireVerifiedOtp(email, otp) {
     throw err;
   }
   const code = String(otp || '').trim();
-  const localOk = isLocalRuntime() && code === LOCAL_OTP;
-  if (!localOk && !otpMatches(email, code, row.otp_hash)) {
+  if (!otpMatches(email, code, row.otp_hash)) {
     const err = new Error('Enter a valid verification code.');
     err.statusCode = 400;
     throw err;
@@ -265,8 +255,7 @@ export async function requestResetOtp({ email }) {
     err.statusCode = 404;
     throw err;
   }
-  const local = isLocalRuntime();
-  const otp = local ? LOCAL_OTP : String(randomInt(0, 1_000_000)).padStart(6, '0');
+  const otp = String(randomInt(0, 1_000_000)).padStart(6, '0');
   const now = new Date();
   stmts.upsertResetOtp.run(
     cleanEmail,
@@ -274,15 +263,13 @@ export async function requestResetOtp({ email }) {
     new Date(now.getTime() + OTP_MS).toISOString(),
     now.toISOString(),
   );
-  if (!local) {
-    const mailed = await sendOtpEmail({ to: cleanEmail, otp });
-    if (!mailed.ok) {
-      const err = new Error(mailed.reason || 'Could not send the verification email.');
-      err.statusCode = 502;
-      throw err;
-    }
+  const mailed = await sendOtpEmail({ to: cleanEmail, otp });
+  if (!mailed.ok) {
+    const err = new Error(mailed.reason || 'Could not send the verification email.');
+    err.statusCode = 502;
+    throw err;
   }
-  return { ok: true, local, email: cleanEmail };
+  return { ok: true, email: cleanEmail };
 }
 
 export function verifyResetOtp({ email, otp }) {
@@ -294,8 +281,7 @@ export function verifyResetOtp({ email, otp }) {
     err.statusCode = 400;
     throw err;
   }
-  const localOk = isLocalRuntime() && code === LOCAL_OTP;
-  if (!localOk && !otpMatches(cleanEmail, code, row.otp_hash)) {
+  if (!otpMatches(cleanEmail, code, row.otp_hash)) {
     const err = new Error('Enter a valid verification code.');
     err.statusCode = 400;
     throw err;
@@ -314,8 +300,7 @@ export async function resetPassword({ email, otp, password }) {
     throw err;
   }
   const code = String(otp || '').trim();
-  const localOk = isLocalRuntime() && code === LOCAL_OTP;
-  if (!localOk && !otpMatches(cleanEmail, code, row.otp_hash)) {
+  if (!otpMatches(cleanEmail, code, row.otp_hash)) {
     const err = new Error('Enter a valid verification code.');
     err.statusCode = 400;
     throw err;

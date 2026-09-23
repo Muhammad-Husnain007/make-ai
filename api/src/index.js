@@ -1,4 +1,7 @@
 import './env.js';
+import { createReadStream, existsSync, statSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Fastify from 'fastify';
 import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
@@ -13,7 +16,8 @@ import { stripPasswordFields } from './safeJson.js';
 import './db.js';
 
 const PORT = Number(process.env.PORT || 8787);
-const HOST = process.env.HOST || '127.0.0.1';
+const HOST = process.env.HOST || '0.0.0.0';
+const dashboardDist = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'dashboard', 'dist');
 
 const app = Fastify({
   logger: {
@@ -52,7 +56,13 @@ app.addContentTypeParser('text/plain', { parseAs: 'string' }, (req, body, done) 
 const agentStore = { getIssue, getProject, saveAgentResult, setAgentStatus, saveAgentPipeline, getAgentPipeline, createAdminNotification };
 
 function dashboardOrigin(req) {
-  return process.env.DASHBOARD_URL || req.headers.origin || 'http://127.0.0.1:5173';
+  const fromEnv = String(process.env.DASHBOARD_URL || '').replace(/\/$/, '');
+  if (fromEnv) return fromEnv;
+  const headerOrigin = String(req.headers.origin || '').replace(/\/$/, '');
+  if (headerOrigin) return headerOrigin;
+  const proto = String(req.headers['x-forwarded-proto'] || 'https').split(',')[0].trim() || 'https';
+  const host = String(req.headers['x-forwarded-host'] || req.headers.host || '').split(',')[0].trim();
+  return host ? `${proto}://${host}` : '';
 }
 
 function cookieValue(req, name) {
@@ -489,6 +499,47 @@ app.post('/ingest/:projectKey', {
     const status = error.statusCode || 500;
     return reply.code(status).send({ ok: false, error: error.message });
   }
+});
+
+function dashboardMime(filePath) {
+  return {
+    '.html': 'text/html; charset=utf-8',
+    '.js': 'text/javascript; charset=utf-8',
+    '.css': 'text/css; charset=utf-8',
+    '.svg': 'image/svg+xml',
+    '.ico': 'image/x-icon',
+    '.json': 'application/json',
+    '.png': 'image/png',
+    '.woff2': 'font/woff2',
+  }[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+}
+
+app.setNotFoundHandler((req, reply) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+  const urlPath = decodeURIComponent(String(req.url || '/').split('?')[0]);
+  if (
+    urlPath.startsWith('/api')
+    || urlPath.startsWith('/ingest')
+    || urlPath.startsWith('/health')
+    || urlPath.startsWith('/queues')
+    || urlPath.startsWith('/realtime')
+  ) {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+  const distRoot = path.resolve(dashboardDist);
+  const requested = path.resolve(distRoot, urlPath.replace(/^\/+/, ''));
+  if (!requested.startsWith(distRoot)) {
+    return reply.code(404).send({ error: 'Not found' });
+  }
+  const index = path.join(distRoot, 'index.html');
+  const target = existsSync(requested) && statSync(requested).isFile() ? requested : index;
+  if (!existsSync(target)) {
+    return reply.code(404).send({ error: 'Dashboard build missing. Run npm run build first.' });
+  }
+  reply.type(dashboardMime(target));
+  return reply.send(createReadStream(target));
 });
 
 const start = async () => {

@@ -157,7 +157,6 @@ export function LoginPage() {
   const [email, setEmail] = useState(params.get('email') || '');
   const [password, setPassword] = useState('');
   const [otp, setOtp] = useState('');
-  const [localOtp, setLocalOtp] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const [busy, setBusy] = useState(false);
@@ -165,7 +164,7 @@ export function LoginPage() {
   const resetTitles = ['Your email', 'Verification code', 'New password'];
   const resetSubtitles = [
     'Enter the email for your Pulse account.',
-    localOtp ? 'Local code is 123456.' : 'Enter the 6-digit code sent to your email.',
+    'Enter the 6-digit code sent to your email.',
     'Password must be at least 8 characters.',
   ];
 
@@ -207,8 +206,7 @@ export function LoginPage() {
     setDone('');
     try {
       if (step === 0) {
-        const data = await requestResetOtp({ email });
-        setLocalOtp(Boolean(data.local));
+        await requestResetOtp({ email });
         goReset(1);
       } else if (step === 1) {
         await verifyResetOtp({ email, otp });
@@ -303,7 +301,7 @@ export function LoginPage() {
         }}
       >
         <Field label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" />
-        <Field label="Password" type="password" value={password} onChange={setPassword} autoComplete="current-password" />
+        <PasswordField label="Password" value={password} onChange={setPassword} autoComplete="current-password" />
         <div className="flex justify-end">
           <button type="button" onClick={openForgot} className="text-sm text-orange-300 hover:underline">
             Forgot password
@@ -328,7 +326,6 @@ export function RegisterPage() {
   const [email, setEmail] = useState(params.get('email') || '');
   const [otp, setOtp] = useState('');
   const [password, setPassword] = useState('');
-  const [localOtp, setLocalOtp] = useState(false);
   const [error, setError] = useState('');
   const [done, setDone] = useState('');
   const [busy, setBusy] = useState(false);
@@ -337,7 +334,7 @@ export function RegisterPage() {
   const subtitles = [
     'Enter your name to get started.',
     inviteToken ? 'Use the invited email address.' : 'We will send a 6-digit code to this email.',
-    localOtp ? 'Local code is 123456.' : 'Enter the 6-digit code sent to your email.',
+    'Enter the 6-digit code sent to your email.',
     'Password must be at least 8 characters.',
   ];
 
@@ -364,8 +361,7 @@ export function RegisterPage() {
         if (name.trim().length < 2) throw new Error('Name must be 2–80 characters.');
         go(1);
       } else if (step === 1) {
-        const data = await requestRegisterOtp({ name, email });
-        setLocalOtp(Boolean(data.local));
+        await requestRegisterOtp({ name, email });
         go(2);
       } else if (step === 2) {
         await verifyRegisterOtp({ email, otp });

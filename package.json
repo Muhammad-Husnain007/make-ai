@@ -12,6 +12,7 @@
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w api\" \"npm run dev -w dashboard\"",
     "setup": "npm install && npm run db:init -w api",
+    "build": "npm run build -w dashboard",
     "start": "npm run start -w api"
   },
   "devDependencies": {

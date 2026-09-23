@@ -2,7 +2,7 @@
 
 SaaS production error tracker: ingest API, AI agent, JavaScript SDK, and a live dashboard.
 
-Pulse traces client crashes, groups them, opens a GitHub PR on the **client repo / base branch**, and emails the **client inbox**. GitHub and PR email belong to the client app, not to Pulse.
+Pulse traces client crashes, groups them, opens a GitHub PR on the **client repo / base branch**, and emails the **client inbox**. GitHub and PR email belong to the client app, not to Pulse. The agent reads stack-matched files from GitHub only.
 
 ## Stack
 
@@ -11,29 +11,18 @@ Pulse traces client crashes, groups them, opens a GitHub PR on the **client repo
 - SDK: browser + Node (`window.onerror`, unhandled rejections, breadcrumbs)
 - Dashboard: React, Vite, Tailwind, Recharts
 
-## Run Pulse itself
+## Run Pulse
 
 ```bash
 cd pulse
 npm run setup
-npm run dev
+npm run build -w dashboard
+npm start
 ```
 
-- Dashboard: http://127.0.0.1:5173
-- API health: http://127.0.0.1:8787/health
-- Demo DSN: `http://127.0.0.1:8787/ingest/pk_live_demo_pulse`
+Put production keys in `.env` (`NODE_ENV`, `HOST`, `PORT`, `DASHBOARD_URL`, `GEMINI_API_KEY`, `SMTP_USER`, `SMTP_PASS`, `ISQUEUEENABLE`, `REDIS_URL`). Create a project in the dashboard and copy that project's DSN into the client app.
 
-Pulse `.env` only needs SaaS keys:
-
-```env
-GEMINI_API_KEY=your_gemini_api_key
-SMTP_USER=you@gmail.com
-SMTP_PASS=your_app_password
-ISQUEUEENABLE=false
-REDIS_URL=redis://127.0.0.1:6379
-```
-
-Set `ISQUEUEENABLE=true` to run scan, fix, PR, and invitation emails as BullMQ jobs (Redis required). The Jobs page and `/queues/ui` dashboard show those queues. `false` keeps the current inline behavior.
+Set `ISQUEUEENABLE=true` to run scan, fix, PR, and invitation emails as BullMQ jobs (`REDIS_URL` required). The Jobs page and `/queues/ui` dashboard show those queues. `false` keeps inline job handling.
 
 Pulse sends mail with those SMTP credentials. Whether a client wants PR emails is `ISENABLEDSENDEMAIL` in **that client app**, not in Pulse.
 
@@ -46,7 +35,7 @@ npm install @pulse/sdk
 ```
 
 ```env
-PULSE_DSN=http://127.0.0.1:8787/ingest/YOUR_PROJECT_KEY
+PULSE_DSN=https://pulse.yourdomain.com/ingest/YOUR_PROJECT_KEY
 PULSE_ENVIRONMENT=production
 PULSE_RELEASE=1.0.0
 PULSE_NOTIFY_EMAIL=alerts@company.com
@@ -65,10 +54,6 @@ ISENABLEDSENDEMAIL=true
 ```
 
 On startup the SDK tells Pulse the repo, base branch, PR email, and whether to send that email. No route changes in the client.
-
-Production uses the same key with your Pulse host:
-
-`https://pulse.yourdomain.com/ingest/YOUR_PROJECT_KEY`
 
 ## Flow
 

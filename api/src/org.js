@@ -9,6 +9,10 @@ export const PLATFORM_OWNER_EMAIL = 'hasnainilyas007@gmail.com';
 export const PR_PRICE_USD = 0.05;
 const INVITE_MS = 14 * 24 * 60 * 60 * 1000;
 
+function publicAppUrl(origin) {
+  return String(origin || process.env.DASHBOARD_URL || '').replace(/\/$/, '');
+}
+
 const stmts = {
   insertCompany: db.prepare('INSERT INTO companies (id, name, created_at) VALUES (?, ?, ?)'),
   companyById: db.prepare('SELECT * FROM companies WHERE id = ?'),
@@ -212,7 +216,7 @@ function serializeInvite(row) {
     expiresAt: row.expires_at,
     createdAt: row.created_at,
     registered: Boolean(stmts.userByEmail.get(normalizeEmail(row.email))),
-    inviteUrl: `${String(process.env.DASHBOARD_URL || 'http://127.0.0.1:5173').replace(/\/$/, '')}/invite/${row.token}`,
+    inviteUrl: `${publicAppUrl()}/invite/${row.token}`,
   };
 }
 
@@ -244,7 +248,7 @@ export function getInvite(token) {
 }
 
 async function sendInvite({ email, kind, companyName, invitedBy, origin, token }) {
-  const inviteUrl = `${String(origin || 'http://127.0.0.1:5173').replace(/\/$/, '')}/invite/${token}`;
+  const inviteUrl = `${publicAppUrl(origin)}/invite/${token}`;
   const mailed = await enqueueInvite({
     to: email,
     inviteUrl,

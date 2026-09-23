@@ -2,7 +2,6 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
-import { nanoid } from 'nanoid';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.join(__dirname, '..', 'data');
@@ -180,25 +179,6 @@ ensureColumn('company_members', 'can_invite', 'INTEGER NOT NULL DEFAULT 0');
 ensureColumn('companies', 'address', "TEXT NOT NULL DEFAULT ''");
 ensureColumn('companies', 'paused', 'INTEGER NOT NULL DEFAULT 0');
 
-const DEMO_KEY = 'pk_live_demo_pulse';
-
-export function ensureDemoProject() {
-  const existing = db.prepare('SELECT * FROM projects WHERE public_key = ?').get(DEMO_KEY);
-  if (existing) return existing;
-  const project = {
-    id: nanoid(),
-    name: 'Production App',
-    public_key: DEMO_KEY,
-    created_at: new Date().toISOString(),
-  };
-  db.prepare('INSERT INTO projects (id, name, public_key, created_at) VALUES (@id, @name, @public_key, @created_at)').run(project);
-  return project;
-}
-
-ensureDemoProject();
-
 if (process.argv.includes('--init')) {
-  const project = db.prepare('SELECT * FROM projects WHERE public_key = ?').get(DEMO_KEY);
   console.log(`Pulse DB ready at ${dbPath}`);
-  console.log(`Demo DSN key: ${project.public_key}`);
 }

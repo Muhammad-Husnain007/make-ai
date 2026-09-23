@@ -40,22 +40,23 @@ export function isQueueEnabled() {
 }
 
 export function redisUrl() {
-  return process.env.REDIS_URL || 'redis://127.0.0.1:6379';
+  return String(process.env.REDIS_URL || '').trim();
 }
 
 function connectionSettings() {
-  try {
-    const url = new URL(redisUrl());
-    return {
-      host: url.hostname || '127.0.0.1',
-      port: Number(url.port || 6379),
-      username: url.username ? decodeURIComponent(url.username) : undefined,
-      password: url.password ? decodeURIComponent(url.password) : undefined,
-      maxRetriesPerRequest: null,
-    };
-  } catch {
-    return { host: '127.0.0.1', port: 6379, maxRetriesPerRequest: null };
+  const raw = redisUrl();
+  if (!raw) {
+    throw new Error('REDIS_URL is required when ISQUEUEENABLE=true');
   }
+  const url = new URL(raw);
+  return {
+    host: url.hostname,
+    port: Number(url.port || 6379),
+    username: url.username ? decodeURIComponent(url.username) : undefined,
+    password: url.password ? decodeURIComponent(url.password) : undefined,
+    tls: url.protocol === 'rediss:' ? {} : undefined,
+    maxRetriesPerRequest: null,
+  };
 }
 
 function compactEvent(event) {
@@ -303,6 +304,12 @@ export async function startQueue({ logger, io, store }) {
     queueReady = false;
     logger?.info?.('Pulse queues off (ISQUEUEENABLE=false). Jobs run inline.');
     return { enabled: false, ready: false };
+  }
+  if (!redisUrl()) {
+    queueReady = false;
+    redisError = 'REDIS_URL is required when ISQUEUEENABLE=true';
+    logger?.error?.(redisError);
+    return { enabled: true, ready: false, error: redisError };
   }
   try {
     const probe = new IORedis(redisUrl(), { maxRetriesPerRequest: null, lazyConnect: true, connectTimeout: 4000 });

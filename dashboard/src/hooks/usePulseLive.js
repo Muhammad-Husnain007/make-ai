@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
 import { getToken } from '../lib/session.js';
 
-const REALTIME_URL = import.meta.env.VITE_API_ORIGIN || 'http://127.0.0.1:8787';
+const REALTIME_URL = import.meta.env.VITE_API_ORIGIN || (typeof window !== 'undefined' ? window.location.origin : '');
 
 export function usePulseLive(onEvent) {
   const callback = useRef(onEvent);
