@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { Bot, GitPullRequest, Mail, Trash2 } from 'lucide-react';
 import { getIssue, patchIssue, deleteIssue, runIssueAgent } from '../lib/api.js';
+import { routes } from '../lib/routes.js';
 import { timeAgo } from '../lib/time.js';
 import { usePulseLive } from '../hooks/usePulseLive.js';
 import { AgentPill } from '../components/AgentPill.jsx';
@@ -28,7 +29,7 @@ export function IssueDetail() {
     const next = payload?.issue;
     if (!next || next.id !== id) return;
     if (next.deleted) {
-      navigate('/open', { replace: true });
+      navigate(routes.errors, { replace: true });
       return;
     }
     setIssue((current) => {
@@ -47,7 +48,7 @@ export function IssueDetail() {
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
-      <button onClick={() => navigate('/open')} className="mb-5 text-sm text-zinc-500 hover:text-white">← All issues</button>
+      <button onClick={() => navigate(routes.errors)} className="mb-5 text-sm text-zinc-500 hover:text-white">← All errors</button>
       <div className="mb-6 flex flex-col items-start justify-between gap-4 sm:flex-row">
         <div className="min-w-0">
           <div className="mb-2 flex flex-wrap items-center gap-2"><Badge level={issue.level} /><AgentPill status={issue.agent_status} /><StatusPill status={issueStatus(issue)} /></div>
@@ -89,7 +90,7 @@ export function IssueDetail() {
         ) : (
           <p className="text-sm text-zinc-500">
             {issue.agent_status === 'running'
-              ? 'AI is opening a pull request…'
+              ? 'AI is testing a fix, then opening a pull request…'
               : issue.agent_status === 'maintenance'
                 ? 'This issue is currently under maintenance. A pull request will appear here when it is ready.'
                 : 'No pull request yet. The GitHub PR URL appears here as soon as the agent opens one.'}
@@ -120,13 +121,13 @@ export function IssueDetail() {
             }}
             className="w-full rounded-lg border border-orange-400/30 px-3 py-1.5 text-xs text-orange-200 hover:bg-orange-500/10 disabled:opacity-50 sm:w-auto"
           >
-            {issue.agent_status === 'running' || running ? 'Finding fix…' : 'Run AI fix'}
+            {issue.agent_status === 'running' || running ? 'Testing fix…' : 'Run AI fix'}
           </button>
         </div>
         <p className="mb-3 text-sm text-zinc-400">
           {issue.agent_status === 'maintenance'
             ? 'This issue is currently under maintenance. Pulse is working on a fix.'
-            : issue.agent_summary || 'New error/fatal issues trigger the agent automatically. It writes a fix on the client GitHub base branch, opens a PR, and emails the address the client registered.'}
+            : issue.agent_summary || 'New error/fatal issues trigger the agent automatically. It writes a fix, tests it, opens a PR on the client GitHub base branch, and emails the address the client registered.'}
         </p>
         {issue.agent_status === 'maintenance' ? (
           <div className="mb-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
@@ -188,7 +189,7 @@ export function IssueDetail() {
             setError('');
             try {
               await deleteIssue(issue.id);
-              navigate('/open', { replace: true });
+              navigate(routes.errors, { replace: true });
             } catch (err) {
               setError(err.message);
               setConfirmDelete(false);

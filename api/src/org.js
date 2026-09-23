@@ -216,7 +216,7 @@ function serializeInvite(row) {
     expiresAt: row.expires_at,
     createdAt: row.created_at,
     registered: Boolean(stmts.userByEmail.get(normalizeEmail(row.email))),
-    inviteUrl: `${publicAppUrl()}/invite/${row.token}`,
+    inviteUrl: `${publicAppUrl()}/invitations/${row.token}`,
   };
 }
 
@@ -248,7 +248,7 @@ export function getInvite(token) {
 }
 
 async function sendInvite({ email, kind, companyName, invitedBy, origin, token }) {
-  const inviteUrl = `${publicAppUrl(origin)}/invite/${token}`;
+  const inviteUrl = `${publicAppUrl(origin)}/invitations/${token}`;
   const mailed = await enqueueInvite({
     to: email,
     inviteUrl,

@@ -5,6 +5,7 @@ import { getQueues } from '../lib/api.js';
 const QUEUE_LABELS = {
   scan: 'Scan issue',
   fix: 'Fix issue',
+  test: 'Test fix',
   pr: 'Make PR',
   invite: 'Invitation email',
 };
@@ -48,7 +49,7 @@ export function JobsPage({ refreshKey }) {
       <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Jobs</h1>
-          <p className="mt-1 text-sm text-zinc-500">BullMQ background jobs for scan, fix, pull requests, and invitation emails.</p>
+          <p className="mt-1 text-sm text-zinc-500">BullMQ background jobs for scan, fix, tests, pull requests, and invitation emails.</p>
         </div>
         {data?.enabled && (
           <button type="button" onClick={openBoard} className="h-10 w-full rounded-lg bg-orange-500 px-4 text-sm font-medium text-ink-950 sm:w-auto">
@@ -70,7 +71,7 @@ export function JobsPage({ refreshKey }) {
       </div>
       {data?.redisError && <div className="mb-4 text-sm text-red-300">{data.redisError}</div>}
 
-      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
         {(data?.queues || Object.keys(QUEUE_LABELS).map((name) => ({ name, counts: {} }))).map((queue) => (
           <button
             key={queue.name}

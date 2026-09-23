@@ -4,6 +4,7 @@ import { CheckCircle2, Eye, EyeOff, ShieldAlert } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle.jsx';
 import { requestRegisterOtp, requestResetOtp, verifyRegisterOtp, verifyResetOtp } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
+import { invitationPath, routes, signUpPath } from '../lib/routes.js';
 
 function Field({ label, type = 'text', value, onChange, autoComplete, readOnly, inputMode, maxLength }) {
   return (
@@ -170,7 +171,7 @@ export function LoginPage() {
 
   if (ready && user) {
     if (inviteToken && !user.company && !user.platformOwner) {
-      return <Navigate to={`/invite/${inviteToken}`} replace />;
+      return <Navigate to={invitationPath(inviteToken)} replace />;
     }
     return <Navigate to="/" replace />;
   }
@@ -214,11 +215,11 @@ export function LoginPage() {
       } else {
         const data = await resetPassword({ email, otp, password });
         if (!data.token) {
-          navigate('/register/thanks', { replace: true });
+          navigate(routes.signUpPending, { replace: true });
           return;
         }
         sessionStorage.removeItem('pulse_invite');
-        navigate(inviteToken ? `/invite/${inviteToken}` : '/', { replace: true });
+        navigate(inviteToken ? invitationPath(inviteToken) : routes.home, { replace: true });
       }
     } catch (err) {
       setError(err.message);
@@ -272,7 +273,7 @@ export function LoginPage() {
     <AuthShell
       title="Sign in"
       subtitle="Login is only for people who already have Pulse access."
-      footer={<>No account? <Link to={inviteToken ? `/register?invite=${inviteToken}` : '/register'} className="text-orange-300 hover:underline">Register</Link></>}
+      footer={<>No account? <Link to={inviteToken ? signUpPath({ invite: inviteToken }) : routes.signUp} className="text-orange-300 hover:underline">Register</Link></>}
     >
       <form
         className="space-y-4"
@@ -287,11 +288,11 @@ export function LoginPage() {
           } catch (err) {
             if (err.inviteToken) {
               sessionStorage.setItem('pulse_invite', err.inviteToken);
-              navigate(`/invite/${err.inviteToken}`, { replace: true });
+              navigate(invitationPath(err.inviteToken), { replace: true });
               return;
             }
             if (err.message?.includes('do not have access')) {
-              navigate('/register/thanks', { replace: true });
+              navigate(routes.signUpPending, { replace: true });
               return;
             }
             setError(err.message);
@@ -340,7 +341,7 @@ export function RegisterPage() {
 
   if (ready && user) {
     if (inviteToken && !user.company && !user.platformOwner) {
-      return <Navigate to={`/invite/${inviteToken}`} replace />;
+      return <Navigate to={invitationPath(inviteToken)} replace />;
     }
     return <Navigate to="/" replace />;
   }
@@ -372,10 +373,10 @@ export function RegisterPage() {
         if (!data.token || data.needsInvite) {
           if (pendingToken) {
             sessionStorage.setItem('pulse_invite', pendingToken);
-            navigate(`/invite/${pendingToken}`, { replace: true });
+            navigate(invitationPath(pendingToken), { replace: true });
             return;
           }
-          navigate('/register/thanks', { replace: true });
+          navigate(routes.signUpPending, { replace: true });
           return;
         }
         navigate('/', { replace: true });
@@ -389,7 +390,7 @@ export function RegisterPage() {
 
   const footer = inviteToken
     ? null
-    : <>Already have an account? <Link to="/login" className="text-orange-300 hover:underline">Login</Link></>;
+    : <>Already have an account? <Link to={routes.signIn} className="text-orange-300 hover:underline">Login</Link></>;
   const fields = [
     <Field key="name" label="Name" value={name} onChange={setName} autoComplete="name" />,
     <Field key="email" label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" readOnly={Boolean(params.get('email'))} />,

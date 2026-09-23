@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Building2, ChevronRight, DollarSign, GitPullRequest, Mail, PauseCircle } from 'lucide-react';
 import { getAdminOverview, getStats } from '../lib/api.js';
+import { routes } from '../lib/routes.js';
 import { CATEGORY_VIEWS, ISSUE_VIEWS } from '../lib/views.js';
 import { StatCard } from '../components/StatCard.jsx';
 import { useAuth } from '../hooks/useAuth.jsx';
@@ -23,12 +24,12 @@ function AdminHome({ refreshKey }) {
       <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Pulse admin</h1>
       <p className="mt-1 mb-6 text-sm text-zinc-500 sm:mb-8">Platform overview for companies, pull-request billing, and account status.</p>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3">
-        <StatCard label="Companies" value={overview?.companies ?? '—'} icon={<Building2 size={16} />} onClick={() => navigate('/companies')} />
+        <StatCard label="Companies" value={overview?.companies ?? '—'} icon={<Building2 size={16} />} onClick={() => navigate(routes.accounts)} />
         <StatCard label="Active companies" value={overview?.activeCompanies ?? '—'} icon={<Building2 size={16} />} />
         <StatCard label="Paused companies" value={overview?.pausedCompanies ?? '—'} icon={<PauseCircle size={16} />} />
         <StatCard label="Total pull requests" value={overview?.pullRequests ?? '—'} icon={<GitPullRequest size={16} />} />
         <StatCard label="Revenue" value={overview ? money(overview.revenue) : '—'} icon={<DollarSign size={16} />} />
-        <StatCard label="Pending invites" value={overview?.pendingInvites ?? '—'} icon={<Mail size={16} />} onClick={() => navigate('/companies')} />
+        <StatCard label="Pending invites" value={overview?.pendingInvites ?? '—'} icon={<Mail size={16} />} onClick={() => navigate(routes.accounts)} />
       </div>
       <p className="mt-6 text-sm text-zinc-500">Each pull request is billed at {overview ? money(overview.pricePerPull) : '$0.05'}.</p>
     </div>

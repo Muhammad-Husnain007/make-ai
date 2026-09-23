@@ -1,3 +1,5 @@
+import { isPublicPath, routes } from './routes.js';
+
 const API = '';
 
 function authHeaders(extra = {}) {
@@ -22,8 +24,8 @@ export async function api(path, options = {}) {
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && path !== '/api/auth/login' && !path.startsWith('/api/auth/register') && !path.startsWith('/api/auth/reset') && !path.startsWith('/api/invites/')) {
     try { localStorage.removeItem('pulse_auth_token'); } catch {}
-    if (!['/login', '/register'].includes(window.location.pathname) && !window.location.pathname.startsWith('/invite/') && window.location.pathname !== '/register/thanks') {
-      window.location.assign('/login');
+    if (!isPublicPath(window.location.pathname)) {
+      window.location.assign(routes.signIn);
     }
   }
   if (!res.ok) {

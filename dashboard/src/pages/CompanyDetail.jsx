@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { ConfirmModal } from '../components/ConfirmModal.jsx';
 import { getAdminCompany, patchAdminCompany } from '../lib/api.js';
+import { alertsPath, routes } from '../lib/routes.js';
 import { timeAgo } from '../lib/time.js';
 
 function money(value) {
@@ -54,7 +55,7 @@ export function CompanyDetail() {
       <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-white/5 bg-ink-900 p-4 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0">
-            <Link to="/companies" className="text-sm text-orange-300 hover:underline">Back to companies</Link>
+            <Link to={routes.accounts} className="text-sm text-orange-300 hover:underline">Back to accounts</Link>
             <h1 className="mt-3 break-words text-2xl font-semibold tracking-tight sm:text-3xl">{company?.name || 'Company'}</h1>
             <p className="mt-1 text-sm text-zinc-500">Billing card — $0.05 for each pull request Pulse opens for this company.</p>
           </div>
@@ -92,7 +93,7 @@ export function CompanyDetail() {
           <section className="mt-8">
             <div className="mb-3 flex items-center justify-between">
               <h2 className="text-sm font-semibold">Agent errors</h2>
-              <Link to={`/notifications?companyId=${company.id}`} className="text-xs text-orange-300 hover:underline">View all</Link>
+              <Link to={alertsPath(company.id)} className="text-xs text-orange-300 hover:underline">View all</Link>
             </div>
             <div className="space-y-3">
               {company.notifications.slice(0, 8).map((note) => (

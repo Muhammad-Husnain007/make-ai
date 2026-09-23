@@ -5,6 +5,7 @@ import { FastifyAdapter } from '@bull-board/fastify';
 import IORedis from 'ioredis';
 import {
   canContinueToFix,
+  canContinueToPr,
   finalizeAgent,
   fixIssue,
   loadGithubContext,
@@ -12,12 +13,14 @@ import {
   runFixAgent,
   scanIssue,
   sendInviteEmail,
+  testFix,
 } from '@pulse/agent';
 import { parseBoolFlag } from './store.js';
 
 export const QUEUE_KEYS = {
   scan: 'pulse-scan',
   fix: 'pulse-fix',
+  test: 'pulse-test',
   pr: 'pulse-pr',
   invite: 'pulse-invite',
 };
@@ -90,6 +93,7 @@ function ensureQueues() {
   queues = {
     scan: new Queue(QUEUE_KEYS.scan, { connection }),
     fix: new Queue(QUEUE_KEYS.fix, { connection }),
+    test: new Queue(QUEUE_KEYS.test, { connection }),
     pr: new Queue(QUEUE_KEYS.pr, { connection }),
     invite: new Queue(QUEUE_KEYS.invite, { connection }),
   };
@@ -212,8 +216,53 @@ async function handleFix(job) {
         logger: runtime.logger,
       });
     }
+    await queues.test.add('test-issue', { issueId, event: compactEvent(event), projectId: project?.id }, JOB_OPTS);
+    return { continued: 'test', issueId, files: fix.files.length };
+  } catch (error) {
+    await failJob(job, error);
+    throw error;
+  }
+}
+
+async function handleTest(job) {
+  try {
+    const { issueId, event, projectId } = job.data;
+    const { issue, project, store } = loadIssueContext(issueId, projectId);
+    const pipeline = store.getAgentPipeline(issue.id);
+    const { github, githubConfig } = await loadGithubContext({ issue, event, project });
+    const tested = await testFix({
+      issue,
+      event,
+      files: pipeline.files || [],
+      analysis: pipeline.analysis || {},
+      github,
+      githubConfig,
+      agentError: pipeline.agentError || '',
+      logger: runtime.logger,
+    });
+    store.saveAgentPipeline(issue.id, {
+      analysis: tested.analysis,
+      agentError: tested.agentError,
+      github: githubMeta(github),
+      githubConfig,
+      files: tested.files,
+      tests: tested.tests,
+    });
+    if (!canContinueToPr(tested)) {
+      return finalizeAgent({
+        issue,
+        event,
+        analysis: tested.analysis,
+        prUrl: '',
+        agentError: tested.agentError,
+        project,
+        store,
+        io: runtime.io,
+        logger: runtime.logger,
+      });
+    }
     await queues.pr.add('create-pr', { issueId, event: compactEvent(event), projectId: project?.id }, JOB_OPTS);
-    return { continued: 'pr', issueId, files: fix.files.length };
+    return { continued: 'pr', issueId, files: tested.files.length };
   } catch (error) {
     await failJob(job, error);
     throw error;
@@ -321,6 +370,7 @@ export async function startQueue({ logger, io, store }) {
     workers = [
       new Worker(QUEUE_KEYS.scan, handleScan, { connection, concurrency: 2 }),
       new Worker(QUEUE_KEYS.fix, handleFix, { connection, concurrency: 2 }),
+      new Worker(QUEUE_KEYS.test, handleTest, { connection, concurrency: 2 }),
       new Worker(QUEUE_KEYS.pr, handlePr, { connection, concurrency: 1 }),
       new Worker(QUEUE_KEYS.invite, handleInvite, { connection, concurrency: 4 }),
     ];

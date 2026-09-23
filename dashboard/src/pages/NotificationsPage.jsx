@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getAdminNotifications, markAdminNotificationRead, markAllAdminNotificationsRead } from '../lib/api.js';
+import { accountPath } from '../lib/routes.js';
 import { timeAgo } from '../lib/time.js';
 
 export function NotificationsPage({ refreshKey }) {
@@ -72,7 +73,7 @@ export function NotificationsPage({ refreshKey }) {
               >
                 <td className="px-4 py-3">
                   {note.companyId ? (
-                    <Link to={`/companies/${note.companyId}`} className="text-orange-300 hover:underline">
+                    <Link to={accountPath(note.companyId)} className="text-orange-300 hover:underline">
                       {note.companyName || 'Company'}
                     </Link>
                   ) : (

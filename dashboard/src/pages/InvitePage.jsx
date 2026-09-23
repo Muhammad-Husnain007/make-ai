@@ -4,6 +4,7 @@ import { ShieldAlert } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle.jsx';
 import { acceptInvite, declineInvite, getInvite } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
+import { invitationPath, signInPath, signUpPath } from '../lib/routes.js';
 
 export function InvitePage() {
   const { token } = useParams();
@@ -39,7 +40,7 @@ export function InvitePage() {
       } catch (err) {
         if (err.needsRegister) {
           sessionStorage.setItem('pulse_invite', token);
-          navigate(`/register?invite=${token}&email=${encodeURIComponent(latest.email)}`, { replace: true });
+          navigate(signUpPath({ invite: token, email: latest.email }), { replace: true });
           return;
         }
         throw err;
@@ -50,7 +51,7 @@ export function InvitePage() {
         navigate('/', { replace: true });
         return;
       }
-      navigate(`/login?email=${encodeURIComponent(latest.email)}`, { replace: true });
+      navigate(signInPath({ email: latest.email }), { replace: true });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -128,7 +129,7 @@ export function InvitePage() {
                 type="button"
                 onClick={async () => {
                   await logout();
-                  navigate(`/invite/${token}`, { replace: true });
+                  navigate(invitationPath(token), { replace: true });
                 }}
                 className="mt-4 text-sm text-orange-300 hover:underline"
               >

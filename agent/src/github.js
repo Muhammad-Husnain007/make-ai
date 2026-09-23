@@ -171,6 +171,33 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
   return { ...target, files, unmatchedReason };
 }
 
+export async function loadRelatedTestFiles(github, patchedPaths = []) {
+  const target = await resolveGithubRepo(github);
+  if (!target.ok) return [];
+  const tree = await listSourceFiles(target);
+  const byPath = new Map(tree.map((item) => [item.path, item]));
+  const wanted = new Set();
+  for (const filePath of patchedPaths) {
+    const normalized = String(filePath || '').replace(/\\/g, '/');
+    const dir = normalized.includes('/') ? normalized.slice(0, normalized.lastIndexOf('/')) : '';
+    const base = normalized.split('/').pop().replace(/\.(?:js|jsx|ts|tsx|mjs|cjs)$/i, '');
+    if (!base) continue;
+    for (const item of tree) {
+      const repoPath = item.path;
+      if (repoPath === normalized || isSecretPath(repoPath)) continue;
+      if (repoPath === `${dir}/${base}.test.js` || repoPath === `${dir}/${base}.spec.js`) wanted.add(repoPath);
+      if (/(?:^|\/)(?:test|tests|__tests__)\//i.test(repoPath) && repoPath.includes(base)) wanted.add(repoPath);
+    }
+  }
+  const files = [];
+  for (const filePath of [...wanted].slice(0, 4)) {
+    const contents = await readGithubFile(target, filePath, byPath.get(filePath)?.sha);
+    if (!contents) continue;
+    files.push({ path: filePath, contents, githubContents: contents });
+  }
+  return files;
+}
+
 export async function createFixPullRequest({ branch, title, body, files, github, target }) {
   const tokenMissing = createClient(github);
   if (!tokenMissing.ok) return tokenMissing;

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Trash2 } from 'lucide-react';
 import { deleteIssue } from '../lib/api.js';
+import { errorPath } from '../lib/routes.js';
 import { timeAgo } from '../lib/time.js';
 import { issueStatus } from '../lib/issueStatus.js';
 import { ConfirmModal } from './ConfirmModal.jsx';
@@ -51,7 +52,7 @@ export function IssueTable({ issues, empty = 'No issues yet.', onDeleted }) {
           {(issues || []).map((issue) => (
             <tr key={issue.id} className="border-t border-white/5 bg-ink-900/40 hover:bg-white/[.03]">
               <td className="px-4 py-3">
-                <Link to={`/issues/${issue.id}`} className="block">
+                <Link to={errorPath(issue.id)} className="block">
                   <div className="font-medium text-zinc-100">{issue.title}</div>
                   <div className="mt-0.5 font-mono text-[11px] text-zinc-500">{issue.culprit || issue.fingerprint}</div>
                 </Link>

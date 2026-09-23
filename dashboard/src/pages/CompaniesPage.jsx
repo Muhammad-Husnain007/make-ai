@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getAdminCompanies, getTeam, inviteCompany, inviteMailMessage, resendInvite } from '../lib/api.js';
 import { useAuth } from '../hooks/useAuth.jsx';
+import { accountPath } from '../lib/routes.js';
 
 function money(value) {
   return `$${Number(value || 0).toFixed(2)}`;
@@ -94,7 +95,7 @@ export function CompaniesPage() {
               {companies.map((company) => (
                 <tr
                   key={company.id}
-                  onClick={() => navigate(`/companies/${company.id}`)}
+                  onClick={() => navigate(accountPath(company.id))}
                   className="cursor-pointer border-t border-white/5 hover:bg-white/4"
                 >
                   <td className="px-4 py-3">{company.name}</td>

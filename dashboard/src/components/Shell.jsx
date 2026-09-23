@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { AlertTriangle, Bell, Building2, Gauge, ListTodo, LogOut, MemoryStick, Menu, Settings2, ShieldAlert, Users, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth.jsx';
+import { isErrorsSection, routes } from '../lib/routes.js';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
 export function Shell({ children, unread = 0 }) {
@@ -9,8 +10,8 @@ export function Shell({ children, unread = 0 }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
-  const homeActive = location.pathname === '/';
-  const issuesActive = ['/open', '/fixed', '/pulls', '/merged', '/closed'].includes(location.pathname) || location.pathname.startsWith('/issues/');
+  const homeActive = location.pathname === routes.home;
+  const issuesActive = isErrorsSection(location.pathname);
   const admin = Boolean(user?.platformOwner);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export function Shell({ children, unread = 0 }) {
         >
           <Menu size={20} />
         </button>
-        <NavLink to="/" className="flex min-w-0 items-center gap-2">
+        <NavLink to={routes.home} className="flex min-w-0 items-center gap-2">
           <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-ink-950 ${homeActive ? 'ring-2 ring-orange-200/40' : ''}`}>
             <ShieldAlert size={16} />
           </span>
@@ -45,7 +46,7 @@ export function Shell({ children, unread = 0 }) {
           <ThemeToggle />
           {admin && (
             <NavLink
-              to="/notifications"
+              to={routes.alerts}
               className={({ isActive }) => `relative rounded-lg p-2 ${isActive ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}
               title="Notifications"
             >
@@ -72,7 +73,7 @@ export function Shell({ children, unread = 0 }) {
       <div className="flex min-h-[calc(100dvh-57px)] lg:min-h-screen">
         <aside className={`fixed inset-y-0 left-0 z-50 flex w-64 max-w-[85vw] flex-col border-r border-white/5 bg-ink-900 px-4 py-5 transition-transform duration-200 lg:static lg:z-0 lg:w-60 lg:max-w-none lg:translate-x-0 ${menuOpen ? 'translate-x-0' : '-translate-x-full'}`}>
           <div className="mb-8 flex items-start justify-between gap-2">
-            <NavLink to="/" className="flex min-w-0 items-center gap-3 px-2">
+            <NavLink to={routes.home} className="flex min-w-0 items-center gap-3 px-2">
               <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-orange-500 text-ink-950 shadow-[0_0_24px_rgba(249,115,22,.35)] ${homeActive ? 'ring-2 ring-orange-200/40' : ''}`}>
                 <ShieldAlert size={18} />
               </span>
@@ -84,7 +85,7 @@ export function Shell({ children, unread = 0 }) {
             <div className="flex items-center">
               {admin && (
                 <NavLink
-                  to="/notifications"
+                  to={routes.alerts}
                   className={({ isActive }) => `relative mt-1 hidden rounded-lg p-2 lg:inline-flex ${isActive ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`}
                   title="Notifications"
                 >
@@ -109,29 +110,29 @@ export function Shell({ children, unread = 0 }) {
           <nav className="space-y-1 overflow-y-auto text-sm">
             {admin ? (
               <>
-                <NavLink to="/companies" className={({ isActive }) => linkClass(isActive || location.pathname.startsWith('/companies/'))}>
-                  <Building2 size={16} /> Companies
+                <NavLink to={routes.accounts} className={({ isActive }) => linkClass(isActive || location.pathname.startsWith(`${routes.accounts}/`))}>
+                  <Building2 size={16} /> Accounts
                 </NavLink>
-                <NavLink to="/jobs" className={({ isActive }) => linkClass(isActive)}>
-                  <ListTodo size={16} /> Jobs
+                <NavLink to={routes.queues} className={({ isActive }) => linkClass(isActive)}>
+                  <ListTodo size={16} /> Queues
                 </NavLink>
               </>
             ) : (
               <>
-                <NavLink to="/open" className={() => linkClass(issuesActive)}>
-                  <AlertTriangle size={16} /> Issues
+                <NavLink to={routes.errors} className={() => linkClass(issuesActive)}>
+                  <AlertTriangle size={16} /> Errors
                 </NavLink>
-                <NavLink to="/performance" className={({ isActive }) => linkClass(isActive)}>
-                  <Gauge size={16} /> Performance optimization
+                <NavLink to={routes.performance} className={({ isActive }) => linkClass(isActive || location.pathname.startsWith('/insights/performance'))}>
+                  <Gauge size={16} /> Performance
                 </NavLink>
-                <NavLink to="/memory-leak" className={({ isActive }) => linkClass(isActive)}>
-                  <MemoryStick size={16} /> Memory leak
+                <NavLink to={routes.memoryLeaks} className={({ isActive }) => linkClass(isActive)}>
+                  <MemoryStick size={16} /> Memory leaks
                 </NavLink>
-                <NavLink to="/setup" className={({ isActive }) => linkClass(isActive)}>
-                  <Settings2 size={16} /> Setup / SDK
+                <NavLink to={routes.integrations} className={({ isActive }) => linkClass(isActive)}>
+                  <Settings2 size={16} /> Integrations
                 </NavLink>
-                <NavLink to="/team" className={({ isActive }) => linkClass(isActive)}>
-                  <Users size={16} /> Team
+                <NavLink to={routes.organization} className={({ isActive }) => linkClass(isActive)}>
+                  <Users size={16} /> Organization
                 </NavLink>
               </>
             )}
@@ -147,7 +148,7 @@ export function Shell({ children, unread = 0 }) {
               type="button"
               onClick={async () => {
                 await logout();
-                navigate('/login', { replace: true });
+                navigate(routes.signIn, { replace: true });
               }}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 hover:bg-white/4 hover:text-white"
             >

@@ -1,10 +1,11 @@
 import path from 'node:path';
-import { analyzeWithGemini } from './gemini.js';
-import { createFixPullRequest, gatherGithubContext } from './github.js';
+import { analyzeWithGemini, reviewFixWithGemini } from './gemini.js';
+import { createFixPullRequest, gatherGithubContext, loadRelatedTestFiles } from './github.js';
 import { emailFixReport, resolveNotifyEmail } from './mailer.js';
 import { applyAiFilePatch, fallbackIssueFix, githubAlreadyHasFix } from './source.js';
 import { presentIssue } from './clientView.js';
 import { assertSafeCommitFiles, isSecretPath, maskContextFile, safePatchedContents } from './secrets.js';
+import { formatTestSummary, remainingCrashSignatures, syntaxCheckFiles } from './verify.js';
 
 function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -98,6 +99,135 @@ function defaultAnalysis(issue) {
 
 export function canContinueToFix(scan) {
   return Boolean(scan?.github?.ok && scan.github.files?.length);
+}
+
+export function canContinueToPr(test) {
+  return Boolean(test?.ok && test.files?.length);
+}
+
+async function runFixTests({ issue, event, files, analysis, github, githubConfig }) {
+  const checks = [];
+  const syntaxFailures = syntaxCheckFiles(files);
+  if (syntaxFailures.length) {
+    return {
+      ok: false,
+      reason: `Syntax check failed in ${syntaxFailures.map((item) => item.path).join(', ')}: ${syntaxFailures[0].detail}`,
+      checks,
+    };
+  }
+  checks.push('syntax');
+
+  const leftovers = remainingCrashSignatures(issue, files);
+  if (leftovers.length) {
+    return {
+      ok: false,
+      reason: leftovers.join('; '),
+      checks,
+    };
+  }
+  checks.push('crash signature');
+
+  let testFiles = [];
+  try {
+    testFiles = await loadRelatedTestFiles(githubConfig || github, (files || []).map((file) => file.path));
+    if (testFiles.length) checks.push(`${testFiles.length} related test file${testFiles.length === 1 ? '' : 's'}`);
+  } catch {
+    testFiles = [];
+  }
+
+  const review = await reviewFixWithGemini({
+    issue,
+    event,
+    patchedFiles: files,
+    testFiles,
+    repo: github?.repoFull,
+    base: github?.base,
+  });
+  if (!review.ok) {
+    return {
+      ok: false,
+      reason: review.reason || 'AI review rejected this patch.',
+      checks,
+    };
+  }
+  checks.push(review.skipped ? 'AI review skipped' : 'AI review');
+  return { ok: true, reason: review.reason || '', checks };
+}
+
+export async function testFix({ issue, event, files, analysis, github, githubConfig, agentError, logger }) {
+  let currentFiles = files || [];
+  let currentAnalysis = { ...analysis };
+  let lastReport = null;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    lastReport = await runFixTests({
+      issue,
+      event,
+      files: currentFiles,
+      analysis: currentAnalysis,
+      github,
+      githubConfig,
+    });
+    if (lastReport.ok) {
+      const summary = formatTestSummary(lastReport);
+      return {
+        ok: true,
+        files: currentFiles,
+        analysis: {
+          ...currentAnalysis,
+          solution: [currentAnalysis.solution, summary].filter(Boolean).join('\n\n'),
+          prBody: [currentAnalysis.prBody, summary].filter(Boolean).join('\n\n'),
+        },
+        agentError,
+        tests: lastReport,
+      };
+    }
+    if (attempt === 1 || !github?.ok || !github.files?.length) break;
+    logger?.warn?.({ reason: lastReport.reason }, 'Pulse fix failed tests; retrying analysis');
+    try {
+      const retryIssue = {
+        ...issue,
+        title: `${issue.title}\n\nPrevious patch failed tests: ${lastReport.reason}`,
+      };
+      const retryFiles = github.files.map((file) => {
+        const patched = currentFiles.find((item) => item.path === file.path);
+        return patched
+          ? { ...file, contents: patched.contents, githubContents: patched.githubContents || patched.contents }
+          : file;
+      });
+      const retryAnalysis = await analyzeWithGemini({
+        issue: retryIssue,
+        event,
+        contextFiles: retryFiles,
+        repo: github.repoFull,
+        base: github.base,
+      });
+      const nextFix = await fixIssue({
+        issue,
+        analysis: { ...currentAnalysis, ...retryAnalysis },
+        github,
+        agentError: '',
+      });
+      if (!nextFix.files.length) break;
+      currentFiles = nextFix.files;
+      currentAnalysis = nextFix.analysis;
+    } catch (error) {
+      logger?.error?.({ err: error }, 'Pulse fix retry after tests failed');
+      break;
+    }
+  }
+
+  const reason = lastReport?.reason || 'Fix failed tests; pull request was not opened.';
+  return {
+    ok: false,
+    files: currentFiles,
+    analysis: {
+      ...currentAnalysis,
+      solution: [currentAnalysis.solution, formatTestSummary(lastReport)].filter(Boolean).join('\n\n'),
+    },
+    agentError: reason,
+    tests: lastReport,
+  };
 }
 
 export async function loadGithubContext({ issue, event, project }) {
@@ -203,6 +333,7 @@ export async function makeFixPr({ issue, event, github, githubConfig, files, ana
         `Base branch: ${github?.base || ''}`,
         `Repo: ${github?.repoFull || ''}`,
         event.url ? `Error URL: ${event.url}` : '',
+        analysis.prBody && /Tests passed/.test(analysis.prBody) ? '' : 'Tests passed before this pull request was opened.',
         '',
         'Client secrets, private keys, and passwords are never sent to the model.',
       ].filter(Boolean).join('\n'),
@@ -297,14 +428,50 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
     github: scan.github,
     agentError: scan.agentError,
   });
+  if (!fix.files.length) {
+    return finalizeAgent({
+      issue: current,
+      event,
+      analysis: fix.analysis,
+      prUrl: '',
+      agentError: fix.agentError,
+      project: scan.owner,
+      store: persistence,
+      io,
+      logger,
+    });
+  }
+  const tested = await testFix({
+    issue: current,
+    event,
+    files: fix.files,
+    analysis: fix.analysis,
+    github: scan.github,
+    githubConfig: scan.githubConfig,
+    agentError: fix.agentError,
+    logger,
+  });
+  if (!tested.ok) {
+    return finalizeAgent({
+      issue: current,
+      event,
+      analysis: tested.analysis,
+      prUrl: '',
+      agentError: tested.agentError,
+      project: scan.owner,
+      store: persistence,
+      io,
+      logger,
+    });
+  }
   const pr = await makeFixPr({
     issue: current,
     event,
     github: scan.github,
     githubConfig: scan.githubConfig,
-    files: fix.files,
-    analysis: fix.analysis,
-    agentError: fix.agentError,
+    files: tested.files,
+    analysis: tested.analysis,
+    agentError: tested.agentError,
   });
   return finalizeAgent({
     issue: current,
