@@ -1,5 +1,5 @@
 import { Octokit } from '@octokit/rest';
-import { assertSafeCommitFiles, isSecretPath } from './secrets.js';
+import { assertSafeCommitFiles, extractSecretStackPaths, isSecretPath, publicSecretLabel } from './secrets.js';
 
 const SOURCE_EXT = /\.(?:js|jsx|ts|tsx|mjs|cjs)$/i;
 
@@ -70,6 +70,7 @@ export function extractStackPaths(stack, culprit = '') {
   const matches = text.match(/(?:file:\/\/\/)?(?:[A-Za-z]:)?[^\s)'"]+\.(?:js|jsx|ts|tsx|mjs|cjs)/gi) || [];
   return [...new Set(matches.map((item) => item
     .replace(/^file:\/\//i, '')
+    .replace(/^[('"`[]+/, '')
     .replace(/\\/g, '/')
     .replace(/^\/+/, '')
     .replace(/^[A-Za-z]:/, '')
@@ -135,22 +136,34 @@ async function readGithubFile(target, path, sha) {
 }
 
 export async function gatherGithubContext({ stack, culprit, release, extra, url, github } = {}) {
+  const extraText = [culprit, url, extra?.main, extra?.cwd].filter(Boolean).join('\n');
+  const secretFiles = extractSecretStackPaths(stack, extraText);
   const target = await resolveGithubRepo(github);
-  if (!target.ok) return { ...target, files: [] };
+  if (!target.ok) return { ...target, files: [], secretFiles };
   const tree = await listSourceFiles(target);
   const byPath = new Map(tree.map((item) => [item.path, item]));
-  const hints = extractStackPaths(stack, [culprit, url, extra?.main, extra?.cwd].filter(Boolean).join('\n'))
+  const hints = extractStackPaths(stack, extraText)
     .filter((hint) => !hint.startsWith('node:') && !hint.includes('internal/modules/') && !hint.includes('/node:'));
   const shopScoped = hints.some((hint) => /shop-api/i.test(hint))
     || /shop-api/i.test(String(release || ''))
     || /shop-api/i.test(String(extra?.cwd || ''));
   const matched = [];
   for (const hint of hints) {
+    if (isSecretPath(hint) || isSecretPath(hint.split('/').pop() || '')) {
+      const label = publicSecretLabel(hint);
+      if (label && !secretFiles.includes(label)) secretFiles.push(label);
+      continue;
+    }
     const ranked = tree
       .map((item) => ({ path: item.path, score: scoreRepoPath(hint, item.path) }))
       .filter((item) => item.score >= 60)
       .sort((a, b) => b.score - a.score);
     const hit = ranked.find((item) => !shopScoped || !item.path.startsWith('pulse/')) || ranked[0];
+    if (hit && isSecretPath(hit.path)) {
+      const label = publicSecretLabel(hit.path);
+      if (label && !secretFiles.includes(label)) secretFiles.push(label);
+      continue;
+    }
     if (hit && !matched.includes(hit.path) && !isSecretPath(hit.path)) matched.push(hit.path);
     if (matched.length >= 4) break;
   }
@@ -163,12 +176,12 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
       githubContents: contents,
     };
   }))).filter(Boolean);
-  const unmatchedReason = files.length
+  const unmatchedReason = files.length || secretFiles.length
     ? ''
-    : (!hints.length
+    : (!hints.length && !secretFiles.length
       ? 'This stack has no client file paths — only Node internals — so Pulse cannot open a PR against the GitHub repo.'
       : `This stack points at ${hints.join(', ')}, which are not files in ${target.repoFull}.`);
-  return { ...target, files, unmatchedReason };
+  return { ...target, files, secretFiles, unmatchedReason };
 }
 
 export async function loadRelatedTestFiles(github, patchedPaths = []) {

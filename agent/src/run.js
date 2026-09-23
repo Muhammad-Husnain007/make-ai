@@ -1,10 +1,17 @@
 import path from 'node:path';
-import { analyzeWithGemini, reviewFixWithGemini } from './gemini.js';
+import { adviseSecretIssue, analyzeWithGemini, reviewFixWithGemini } from './gemini.js';
 import { createFixPullRequest, gatherGithubContext, loadRelatedTestFiles } from './github.js';
 import { emailFixReport, resolveNotifyEmail } from './mailer.js';
 import { applyAiFilePatch, fallbackIssueFix, githubAlreadyHasFix } from './source.js';
 import { presentIssue } from './clientView.js';
-import { assertSafeCommitFiles, isSecretPath, maskContextFile, safePatchedContents } from './secrets.js';
+import {
+  assertSafeCommitFiles,
+  defaultSecretGuidance,
+  formatSecretGuidance,
+  isSecretPath,
+  maskContextFile,
+  safePatchedContents,
+} from './secrets.js';
 import { formatTestSummary, remainingCrashSignatures, syntaxCheckFiles } from './verify.js';
 
 function normalizePath(value) {
@@ -94,7 +101,26 @@ function defaultAnalysis(issue) {
     solution: '',
     prTitle: fixedIssueName(issue.title),
     prBody: '',
+    secretGuidance: [],
   };
+}
+
+function attachSecretGuidance(analysis, secretFiles, issue) {
+  const files = secretFiles || [];
+  if (!files.length && !(analysis?.secretGuidance || []).length) return analysis;
+  const guidance = (analysis?.secretGuidance || []).length
+    ? analysis.secretGuidance
+    : defaultSecretGuidance(files, issue);
+  const formatted = formatSecretGuidance(guidance);
+  return {
+    ...analysis,
+    secretGuidance: guidance,
+    solution: [analysis.solution, formatted].filter(Boolean).join('\n\n'),
+  };
+}
+
+export function isSecretOnlyIssue(scan) {
+  return Boolean((scan?.github?.secretFiles || []).length) && !(scan?.github?.files || []).length;
 }
 
 export function canContinueToFix(scan) {
@@ -201,10 +227,17 @@ export async function testFix({ issue, event, files, analysis, github, githubCon
         contextFiles: retryFiles,
         repo: github.repoFull,
         base: github.base,
+        secretFiles: github.secretFiles || [],
       });
       const nextFix = await fixIssue({
         issue,
-        analysis: { ...currentAnalysis, ...retryAnalysis },
+        analysis: {
+          ...currentAnalysis,
+          ...retryAnalysis,
+          secretGuidance: retryAnalysis.secretGuidance?.length
+            ? retryAnalysis.secretGuidance
+            : currentAnalysis.secretGuidance,
+        },
         github,
         agentError: '',
       });
@@ -249,14 +282,33 @@ export async function scanIssue({ issue, event, project, logger, store }) {
   const owner = project || persistence.getProject?.(current.project_id);
   let analysis = defaultAnalysis(issue);
   let agentError = '';
-  let github = { ok: false, files: [], reason: '', unmatchedReason: '', repoFull: '', base: '' };
+  let github = { ok: false, files: [], secretFiles: [], reason: '', unmatchedReason: '', repoFull: '', base: '' };
   let githubConfig = clientGithub(owner);
 
   try {
     const loaded = await loadGithubContext({ issue: current, event, project: owner });
-    github = loaded.github;
+    github = { secretFiles: [], ...loaded.github };
     githubConfig = loaded.githubConfig;
-    if (!github.ok) {
+    const secretFiles = github.secretFiles || [];
+    const secretOnly = secretFiles.length && !github.files?.length;
+    if (secretOnly) {
+      try {
+        analysis = {
+          ...analysis,
+          ...(await adviseSecretIssue({ issue, event, secretFiles })),
+        };
+      } catch (error) {
+        analysis = {
+          ...analysis,
+          summary: `This crash involves secret files (${secretFiles.join(', ')}). Pulse cannot read or patch them.`,
+          rootCause: issue.title,
+          solution: 'Update these secret files locally and keep them out of git.',
+          secretGuidance: defaultSecretGuidance(secretFiles, issue),
+        };
+        logger?.error?.({ err: error }, 'Pulse secret-file analysis failed');
+      }
+      analysis = attachSecretGuidance(analysis, secretFiles, issue);
+    } else if (!github.ok) {
       agentError = github.reason || 'Client GitHub is not connected';
     } else if (!github.files.length) {
       agentError = github.unmatchedReason || 'Could not match this stack to client source files.';
@@ -270,8 +322,10 @@ export async function scanIssue({ issue, event, project, logger, store }) {
             contextFiles: github.files,
             repo: github.repoFull,
             base: github.base,
+            secretFiles,
           })),
         };
+        analysis = attachSecretGuidance(analysis, secretFiles, issue);
       } catch (error) {
         agentError = error.message || 'AI analysis failed';
         analysis = {
@@ -280,6 +334,7 @@ export async function scanIssue({ issue, event, project, logger, store }) {
           rootCause: issue.title,
           solution: 'Review the stack trace on the client base branch and re-run the agent after the model is available.',
         };
+        analysis = attachSecretGuidance(analysis, secretFiles, issue);
         logger?.error?.({ err: error }, 'Pulse AI analysis failed');
       }
     }
@@ -327,7 +382,9 @@ export async function makeFixPr({ issue, event, github, githubConfig, files, ana
       branch: prName,
       title: prName,
       body: [
-        analysis.prBody || analysis.solution || analysis.summary,
+        analysis.prBody || analysis.summary || analysis.rootCause,
+        '',
+        formatSecretGuidance(analysis.secretGuidance),
         '',
         `Tracked issue: ${issue.id}`,
         `Base branch: ${github?.base || ''}`,
@@ -350,15 +407,16 @@ export async function makeFixPr({ issue, event, github, githubConfig, files, ana
   return { prUrl, analysis: nextAnalysis, agentError: nextError };
 }
 
-export async function finalizeAgent({ issue, event, analysis, prUrl, agentError, project, store, io, logger }) {
+export async function finalizeAgent({ issue, event, analysis, prUrl, agentError, project, store, io, logger, secretAlert = false }) {
   const persistence = requireStore(store);
   const current = persistence.getIssue(issue.id) || issue;
   const owner = project || persistence.getProject?.(current.project_id);
   const mailTo = resolveNotifyEmail(owner, current);
   let emailedAt = null;
   let emailedTo = '';
-  let nextError = agentError;
-  const failed = Boolean(nextError) && !prUrl;
+  let nextError = secretAlert ? '' : agentError;
+  const secretGuidance = analysis?.secretGuidance || [];
+  const failed = Boolean(nextError) && !prUrl && !secretAlert;
 
   if (!failed) {
     try {
@@ -391,19 +449,35 @@ export async function finalizeAgent({ issue, event, analysis, prUrl, agentError,
     agentError: nextError || '',
   });
 
-  if (nextError) {
-    try {
-      const note = persistence.createAdminNotification?.({
+  try {
+    const secretTitle = secretGuidance.map((item) => item.path).filter(Boolean).join(', ') || 'secret files';
+    const note = secretAlert || secretGuidance.length
+      ? persistence.createAdminNotification?.({
         companyId: owner?.company_id,
         projectId: owner?.id || current.project_id,
         issueId: issue.id,
-        title: current.title || issue.title || 'AI agent error',
-        message: nextError,
-      });
-      if (note) io?.to('platform').emit('pulse:notification', note);
-    } catch (error) {
-      logger?.error?.({ err: error }, 'Pulse admin notification failed');
-    }
+        title: prUrl
+          ? `Fix PR opened; update ${secretTitle} locally`
+          : `Secret file issue: ${secretTitle}`,
+        message: [
+          analysis.summary,
+          analysis.rootCause,
+          formatSecretGuidance(secretGuidance) || analysis.solution,
+          nextError,
+        ].filter(Boolean).join('\n\n'),
+      })
+      : nextError
+        ? persistence.createAdminNotification?.({
+          companyId: owner?.company_id,
+          projectId: owner?.id || current.project_id,
+          issueId: issue.id,
+          title: current.title || issue.title || 'AI agent error',
+          message: nextError,
+        })
+        : null;
+    if (note) io?.to('platform').emit('pulse:notification', note);
+  } catch (error) {
+    logger?.error?.({ err: error }, 'Pulse admin notification failed');
   }
 
   emitIssue(io, saved, owner);
@@ -422,6 +496,20 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
   emitIssue(io, { ...current, agent_status: 'running' }, owner);
 
   const scan = await scanIssue({ issue: current, event, project: owner, logger, store: persistence });
+  if (isSecretOnlyIssue(scan)) {
+    return finalizeAgent({
+      issue: current,
+      event,
+      analysis: scan.analysis,
+      prUrl: '',
+      agentError: '',
+      project: scan.owner,
+      store: persistence,
+      io,
+      logger,
+      secretAlert: true,
+    });
+  }
   const fix = await fixIssue({
     issue: current,
     analysis: scan.analysis,

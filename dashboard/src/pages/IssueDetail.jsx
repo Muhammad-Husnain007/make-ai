@@ -133,9 +133,18 @@ export function IssueDetail() {
           <div className="mb-3 rounded-xl border border-amber-400/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
             This issue is currently under maintenance. You will see the pull request here when it is ready.
           </div>
-        ) : issue.agent_solution ? (
-          <pre className="mb-3 max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/30 p-3 font-mono text-[12px] text-orange-100/90">{issue.agent_solution}</pre>
-        ) : null}
+        ) : (
+          <>
+            {/Secret files you must update/i.test(issue.agent_solution || '') ? (
+              <div className="mb-3 rounded-xl border border-amber-400/25 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
+                Pulse will not read or commit secret files. Apply those local changes yourself; source-file fixes still go out as a pull request when they exist.
+              </div>
+            ) : null}
+            {issue.agent_solution ? (
+              <pre className="mb-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-xl bg-black/30 p-3 font-mono text-[12px] text-orange-100/90">{issue.agent_solution}</pre>
+            ) : null}
+          </>
+        )}
         <div className="flex flex-wrap gap-4 text-xs text-zinc-400">
           {issue.pr_url && <PullLink url={issue.pr_url} className="text-xs" />}
           <span className="inline-flex items-center gap-1">

@@ -103,7 +103,15 @@ export async function emailFixReport({ issue, event, analysis, prUrl, error, to,
   const from = process.env.SMTP_USER || process.env.GMAIL_USER;
   const subject = prUrl
     ? `[Pulse] Fix PR opened: ${issue.title}`.slice(0, 120)
-    : `[Pulse] AI fix ready: ${issue.title}`.slice(0, 120);
+    : analysis?.secretGuidance?.length
+      ? `[Pulse] Secret file action needed: ${issue.title}`.slice(0, 120)
+      : `[Pulse] AI fix ready: ${issue.title}`.slice(0, 120);
+
+  const secretHtml = (analysis?.secretGuidance || []).length
+    ? `<h3>Secret files you must update yourself</h3>
+      <p>Pulse does not read or commit secret files. Apply these changes locally:</p>
+      <ul>${analysis.secretGuidance.map((item) => `<li><strong>${escapeHtml(item.path)}</strong>: ${escapeHtml([item.issue, item.action].filter(Boolean).join(' '))}</li>`).join('')}</ul>`
+    : '';
 
   const html = `
     <div style="font-family:Arial,sans-serif;max-width:640px;color:#111">
@@ -113,11 +121,16 @@ export async function emailFixReport({ issue, event, analysis, prUrl, error, to,
       <p><strong>Level:</strong> ${escapeHtml(issue.level)} · <strong>Culprit:</strong> ${escapeHtml(issue.culprit || 'n/a')}</p>
       <p><strong>Environment:</strong> ${escapeHtml(event?.environment || 'n/a')}</p>
       ${prUrl ? `<p><strong>Pull request:</strong> <a href="${escapeHtml(prUrl)}">${escapeHtml(prUrl)}</a></p>` : ''}
-      <p>The PR is based on the client's current GitHub base-branch files, with the AI patch applied on top.</p>
+      <p>${prUrl
+        ? 'The PR is based on the client\'s current GitHub base-branch files, with the AI patch applied on top.'
+        : analysis?.secretGuidance?.length
+          ? 'Pulse did not open a pull request because this crash is in secret files. Apply the local changes below and keep those files out of git.'
+          : 'The agent finished without a pull request.'}</p>
       <h3>Root cause</h3>
       <p>${escapeHtml(analysis?.rootCause || 'Not available')}</p>
       <h3>Solution</h3>
       <pre style="background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;white-space:pre-wrap">${escapeHtml(analysis?.solution || analysis?.summary || 'Not available')}</pre>
+      ${secretHtml}
       <h3>Stack</h3>
       <pre style="background:#111827;color:#d1d5db;padding:12px;border-radius:8px;white-space:pre-wrap">${escapeHtml((event?.stack || '').slice(0, 4000))}</pre>
     </div>

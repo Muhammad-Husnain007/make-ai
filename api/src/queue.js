@@ -8,6 +8,7 @@ import {
   canContinueToPr,
   finalizeAgent,
   fixIssue,
+  isSecretOnlyIssue,
   loadGithubContext,
   makeFixPr,
   runFixAgent,
@@ -84,6 +85,7 @@ function githubMeta(github) {
     base: github?.base || '',
     reason: github?.reason || '',
     unmatchedReason: github?.unmatchedReason || '',
+    secretFiles: github?.secretFiles || [],
   };
 }
 
@@ -162,17 +164,18 @@ async function handleScan(job) {
       agentError: scan.agentError,
       github: githubMeta(scan.github),
     });
-    if (!canContinueToFix(scan)) {
+    if (isSecretOnlyIssue(scan) || !canContinueToFix(scan)) {
       return finalizeAgent({
         issue,
         event,
         analysis: scan.analysis,
         prUrl: '',
-        agentError: scan.agentError,
+        agentError: isSecretOnlyIssue(scan) ? '' : scan.agentError,
         project,
         store,
         io: runtime.io,
         logger: runtime.logger,
+        secretAlert: isSecretOnlyIssue(scan),
       });
     }
     await queues.fix.add('fix-issue', { issueId, event: compactEvent(event), projectId: project?.id, force }, JOB_OPTS);

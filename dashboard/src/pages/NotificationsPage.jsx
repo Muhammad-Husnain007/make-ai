@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { getAdminNotifications, markAdminNotificationRead, markAllAdminNotificationsRead } from '../lib/api.js';
-import { accountPath } from '../lib/routes.js';
+import { accountPath, errorPath } from '../lib/routes.js';
 import { timeAgo } from '../lib/time.js';
 
 export function NotificationsPage({ refreshKey }) {
@@ -24,7 +24,7 @@ export function NotificationsPage({ refreshKey }) {
       <div className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:flex-wrap sm:items-end sm:justify-between">
         <div className="min-w-0">
           <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Notifications</h1>
-          <p className="mt-1 text-sm text-zinc-500">AI agent errors are hidden from clients and sent here, per company.</p>
+          <p className="mt-1 text-sm text-zinc-500">Secret-file alerts and AI agent errors land here, per company. Clients still see the issue and solution on the error page.</p>
         </div>
         {data.unread > 0 && (
           <button
@@ -56,14 +56,14 @@ export function NotificationsPage({ refreshKey }) {
             <tr>
               <th className="px-4 py-3">Company</th>
               <th className="px-4 py-3">Issue</th>
-              <th className="px-4 py-3">Error</th>
+              <th className="px-4 py-3">Alert</th>
               <th className="px-4 py-3">When</th>
             </tr>
           </thead>
           <tbody>
             {data.notifications.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-4 py-10 text-zinc-500">No agent errors yet.</td>
+                <td colSpan={4} className="px-4 py-10 text-zinc-500">No alerts yet.</td>
               </tr>
             )}
             {data.notifications.map((note) => (
@@ -80,9 +80,15 @@ export function NotificationsPage({ refreshKey }) {
                     <span className="text-zinc-400">{note.companyName || 'Unknown company'}</span>
                   )}
                 </td>
-                <td className="px-4 py-3 text-zinc-200">{note.title}</td>
+                <td className="px-4 py-3 text-zinc-200">
+                  {note.issueId ? (
+                    <Link to={errorPath(note.issueId)} className="text-orange-300 hover:underline">
+                      {note.title}
+                    </Link>
+                  ) : note.title}
+                </td>
                 <td className="px-4 py-3">
-                  <pre className="max-w-xl whitespace-pre-wrap break-words font-mono text-[12px] text-red-200">{note.message}</pre>
+                  <pre className={`max-w-xl whitespace-pre-wrap break-words font-mono text-[12px] ${/^Secret file/i.test(note.title || '') ? 'text-amber-200' : 'text-red-200'}`}>{note.message}</pre>
                   {!note.readAt && (
                     <button
                       type="button"

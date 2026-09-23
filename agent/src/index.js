@@ -4,6 +4,7 @@ export {
   canContinueToPr,
   finalizeAgent,
   fixIssue,
+  isSecretOnlyIssue,
   loadGithubContext,
   makeFixPr,
   runFixAgent,

@@ -35,6 +35,54 @@ export function isSecretPath(filePath) {
   return SECRET_PATH_RE.test(path) || SECRET_PATH_DIR_RE.test(path);
 }
 
+export function publicSecretLabel(filePath) {
+  const path = normalizePath(filePath).replace(/^file:\/\//i, '').replace(/^[A-Za-z]:/, '');
+  const parts = path.split('/').filter(Boolean);
+  const base = parts[parts.length - 1] || '';
+  const parent = parts[parts.length - 2] || '';
+  if (!base) return '';
+  if (parent && /^(secrets?|private|certs?|certificates|keys|\.config)$/i.test(parent)) {
+    return `${parent}/${base}`;
+  }
+  return base;
+}
+
+export function extractSecretStackPaths(stack, extra = '') {
+  const text = `${stack || ''}\n${extra || ''}`;
+  const matches = String(text).match(/(?:file:\/\/\/)?(?:[A-Za-z]:)?[^\s)'"]+/g) || [];
+  const out = [];
+  for (const raw of matches) {
+    const cleaned = raw
+      .replace(/^file:\/\//i, '')
+      .replace(/^[('"`[]+/, '')
+      .replace(/\\/g, '/')
+      .replace(/:\d+:\d+$/, '')
+      .replace(/:\d+$/, '');
+    if (!isSecretPath(cleaned) && !isSecretPath(cleaned.split('/').pop() || '')) continue;
+    const label = publicSecretLabel(cleaned);
+    if (label && !out.includes(label)) out.push(label);
+  }
+  return out;
+}
+
+export function defaultSecretGuidance(secretFiles, issue) {
+  return (secretFiles || []).map((path) => ({
+    path,
+    issue: `This crash involves ${path}. Pulse never reads or commits secret files.`,
+    action: `Open ${path} locally and fix the setting related to: ${String(issue?.title || 'this error').slice(0, 160)}. Do not commit this file.`,
+  }));
+}
+
+export function formatSecretGuidance(guidance) {
+  const items = (guidance || []).filter((item) => item?.path && (item.issue || item.action));
+  if (!items.length) return '';
+  return [
+    '## Secret files you must update yourself',
+    'Pulse does not read, send to the model, or commit secret files. Apply these changes locally and keep them out of git:',
+    ...items.map((item) => `- \`${item.path}\`: ${[item.issue, item.action].filter(Boolean).join(' ')}`),
+  ].join('\n');
+}
+
 function collectMatches(text, patterns) {
   const found = [];
   for (const pattern of patterns) {
