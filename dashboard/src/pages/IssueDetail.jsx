@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { Bot, GitPullRequest, Mail } from 'lucide-react';
-import { getIssue, patchIssue, runIssueAgent } from '../lib/api.js';
+import { Bot, GitPullRequest, Mail, Trash2 } from 'lucide-react';
+import { getIssue, patchIssue, deleteIssue, runIssueAgent } from '../lib/api.js';
 import { timeAgo } from '../lib/time.js';
 import { usePulseLive } from '../hooks/usePulseLive.js';
 import { AgentPill } from '../components/AgentPill.jsx';
 import { Badge } from '../components/Badge.jsx';
+import { ConfirmModal } from '../components/ConfirmModal.jsx';
 import { Meta } from '../components/Meta.jsx';
 import { PullLink } from '../components/PullLink.jsx';
 import { Row } from '../components/Row.jsx';
@@ -17,12 +18,19 @@ export function IssueDetail() {
   const navigate = useNavigate();
   const [issue, setIssue] = useState(null);
   const [running, setRunning] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   const load = () => getIssue(id).then((data) => setIssue(data.issue)).catch(() => setIssue(null));
   useEffect(() => { load(); }, [id]);
   usePulseLive((payload) => {
     const next = payload?.issue;
     if (!next || next.id !== id) return;
+    if (next.deleted) {
+      navigate('/open', { replace: true });
+      return;
+    }
     setIssue((current) => {
       if (!current) return next;
       return {
@@ -56,8 +64,17 @@ export function IssueDetail() {
               {status}
             </button>
           ))}
+          <button
+            type="button"
+            onClick={() => { setError(''); setConfirmDelete(true); }}
+            className="inline-flex flex-1 items-center justify-center gap-1 rounded-lg border border-red-400/30 px-3 py-2 text-xs text-red-300 hover:bg-red-500/10 sm:flex-none"
+          >
+            <Trash2 size={14} />
+            Delete
+          </button>
         </div>
       </div>
+      {error && <div className="mb-4 text-sm text-red-300">{error}</div>}
 
       <div className="mb-6 grid grid-cols-1 gap-3 text-sm sm:grid-cols-3">
         <Meta label="Users affected" value={Number(issue.user_count || issue.affectedUsers?.length || 0)} />
@@ -159,6 +176,29 @@ export function IssueDetail() {
           </div>
         </section>
       </div>
+      {confirmDelete && (
+        <ConfirmModal
+          danger
+          title="Delete issue"
+          body={`Delete “${issue.title}”? Events for this issue will be removed. This cannot be undone.`}
+          confirmLabel="Delete issue"
+          busy={busy}
+          onConfirm={async () => {
+            setBusy(true);
+            setError('');
+            try {
+              await deleteIssue(issue.id);
+              navigate('/open', { replace: true });
+            } catch (err) {
+              setError(err.message);
+              setConfirmDelete(false);
+            } finally {
+              setBusy(false);
+            }
+          }}
+          onCancel={() => { if (!busy) setConfirmDelete(false); }}
+        />
+      )}
     </div>
   );
 }

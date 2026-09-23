@@ -8,7 +8,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Server } from 'socket.io';
 import { listPullStates, presentIssue, shouldRunAgent } from '@pulse/agent';
-import { applyPullStates, createAdminNotification, createProject, getAgentPipeline, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentPipeline, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
+import { applyPullStates, createAdminNotification, createProject, deleteIssue, getAgentPipeline, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentPipeline, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
 import { getUserByToken, loginUser, logoutToken, readBearerToken, registerUser, requestRegisterOtp, requestResetOtp, resetPassword, verifyRegisterOtp, verifyResetOtp } from './auth.js';
 import { acceptInvite, adminOverview, canAccessProject, declineInvite, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, isPlatformOwner, listAdminCompanies, listAdminNotifications, listTeam, markAdminNotificationRead, markAllAdminNotificationsRead, removeMember, resendInvite, revokeInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
 import { enqueueScan, getQueueDashboard, isQueueEnabled, queueHealth, registerQueueBoard, startQueue } from './queue.js';
@@ -114,6 +114,14 @@ function emitIssueRooms(project, issue) {
   app.io?.to('platform').emit('pulse:issue', presentIssue(issue, { admin: true }));
   if (project?.company_id) {
     app.io.to(`company:${project.company_id}`).emit('pulse:issue', presentIssue(issue, { admin: false }));
+  }
+}
+
+function emitIssueDeleted(project, issueId) {
+  const payload = { id: issueId, deleted: true };
+  app.io?.to('platform').emit('pulse:issue', payload);
+  if (project?.company_id) {
+    app.io.to(`company:${project.company_id}`).emit('pulse:issue', payload);
   }
 }
 
@@ -429,6 +437,15 @@ app.patch('/api/issues/:id', async (req, reply) => {
   if (!issue) return reply.code(400).send({ error: 'Unable to update issue' });
   emitIssueRooms(getProject(issue.project_id), issue);
   return { issue: presentForUser(req.user, issue) };
+});
+
+app.delete('/api/issues/:id', async (req, reply) => {
+  const current = getIssue(req.params.id);
+  if (!current || !canAccessProject(req.user, current.project_id)) return reply.code(404).send({ error: 'Issue not found' });
+  const removed = deleteIssue(req.params.id);
+  if (!removed) return reply.code(404).send({ error: 'Issue not found' });
+  emitIssueDeleted(getProject(removed.project_id), removed.id);
+  return { ok: true, id: removed.id };
 });
 
 app.post('/api/issues/:id/agent', async (req, reply) => {

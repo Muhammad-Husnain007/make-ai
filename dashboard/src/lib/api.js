@@ -68,6 +68,7 @@ export const getIssues = (params = {}) => {
 };
 export const getIssue = (id) => api(`/api/issues/${id}`);
 export const patchIssue = (id, status) => api(`/api/issues/${id}`, { method: 'PATCH', body: { status } });
+export const deleteIssue = (id) => api(`/api/issues/${id}`, { method: 'DELETE' });
 export const runIssueAgent = (id) => api(`/api/issues/${id}/agent`, { method: 'POST', body: {} });
 export const getStats = (projectId) => api(`/api/stats${projectId ? `?projectId=${projectId}` : ''}`);
 export const getQueues = () => api('/api/queues');

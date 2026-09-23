@@ -98,6 +98,9 @@ const stmts = {
   `),
   listEvents: db.prepare('SELECT * FROM events WHERE issue_id = ? ORDER BY timestamp DESC LIMIT ?'),
   updateStatus: db.prepare('UPDATE issues SET status = ? WHERE id = ?'),
+  deleteEvents: db.prepare('DELETE FROM events WHERE issue_id = ?'),
+  deleteIssueNotifications: db.prepare('DELETE FROM admin_notifications WHERE issue_id = ?'),
+  deleteIssue: db.prepare('DELETE FROM issues WHERE id = ?'),
   setAgentStatus: db.prepare('UPDATE issues SET agent_status = ? WHERE id = ?'),
   saveAgent: db.prepare(`
     UPDATE issues
@@ -490,6 +493,18 @@ export function setIssueStatus(id, status) {
   if (!['open', 'resolved', 'ignored'].includes(status)) return null;
   stmts.updateStatus.run(status, id);
   return stmts.getIssue.get(id);
+}
+
+export function deleteIssue(id) {
+  const issue = stmts.getIssue.get(id);
+  if (!issue) return null;
+  const run = db.transaction(() => {
+    stmts.deleteEvents.run(id);
+    stmts.deleteIssueNotifications.run(id);
+    stmts.deleteIssue.run(id);
+  });
+  run();
+  return issue;
 }
 
 export function stats(projectId, projectIds) {

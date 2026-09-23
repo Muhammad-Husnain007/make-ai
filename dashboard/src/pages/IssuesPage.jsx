@@ -84,7 +84,14 @@ export function IssuesPage({ refreshKey, view = 'open' }) {
       </div>
       )}
 
-      <IssueTable issues={issues} empty={loadError || currentView.empty} />
+      <IssueTable
+        issues={issues}
+        empty={loadError || currentView.empty}
+        onDeleted={(id) => {
+          setIssues((current) => (current || []).filter((issue) => issue.id !== id));
+          getStats().then((data) => setStats(data.stats)).catch(() => {});
+        }}
+      />
     </div>
   );
 }
