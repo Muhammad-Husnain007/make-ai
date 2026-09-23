@@ -1,4 +1,5 @@
 import { GoogleGenAI } from '@google/genai';
+import { isSecretPath, maskContextFile, redactText, sanitizeIssuePayload } from './secrets.js';
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const isRetryableAi = (error) => /UNAVAILABLE|503|high demand|RESOURCE_EXHAUSTED|429|overloaded/i.test(error?.message || String(error || ''));
@@ -15,21 +16,18 @@ function parseJsonObject(raw) {
   return JSON.parse(cleaned.slice(start, end + 1));
 }
 
-function crashLine(issue, event) {
-  const text = `${issue.culprit || ''}\n${event.stack || ''}`;
-  const match = text.match(/([^/\\]+\.(?:js|jsx|mjs|cjs)):(\d+)(?::\d+)?/i);
+function sanitizeAnalysis(analysis) {
+  const files = Array.isArray(analysis?.files) ? analysis.files.map((file) => ({
+    path: file?.path,
+    edits: Array.isArray(file?.edits) ? file.edits : Array.isArray(file?.changes) ? file.changes : [],
+  })) : [];
   return {
-    file: match?.[1] || '',
-    line: match ? Number(match[2]) : 0,
+    summary: redactText(analysis?.summary || ''),
+    rootCause: redactText(analysis?.rootCause || ''),
+    solution: redactText(analysis?.solution || ''),
+    prBody: redactText(analysis?.prBody || ''),
+    files,
   };
-}
-
-function fileWindow(contents, line, radius = 45) {
-  const rows = String(contents || '').replace(/\r\n/g, '\n').split('\n');
-  if (!line) return { startLine: 1, contents: rows.slice(0, 120).join('\n') };
-  const start = Math.max(0, line - radius - 1);
-  const end = Math.min(rows.length, line + radius);
-  return { startLine: start + 1, contents: rows.slice(start, end).join('\n') };
 }
 
 export async function analyzeWithGemini({ issue, event, contextFiles, repo, base }) {
@@ -38,14 +36,18 @@ export async function analyzeWithGemini({ issue, event, contextFiles, repo, base
   const preferred = (process.env.PRIMARY_GEMINI_MODEL || 'gemini-3.6-flash').replace(/^models\//, '');
   const models = [...new Set([preferred, 'gemini-3.6-flash', 'gemini-flash-latest'])];
   const ai = new GoogleGenAI({ apiKey });
-  const allowedPaths = contextFiles.map((file) => file.path);
-  const focus = crashLine(issue, event);
-  const snippets = contextFiles.map((file) => ({
+  const safeFiles = (contextFiles || [])
+    .map((file) => maskContextFile(file))
+    .filter((file) => file && !isSecretPath(file.path));
+  if (!safeFiles.length) throw new Error('No non-secret stack files are available for AI analysis.');
+  const allowedPaths = safeFiles.map((file) => file.path);
+  const payload = sanitizeIssuePayload(issue, event);
+  const files = safeFiles.map((file) => ({
     path: file.path,
-    ...fileWindow(file.contents, focus.line),
+    contents: file.contents,
   }));
   const prompt = `You are Pulse. Fix this production crash with a GitHub PR against \`${repo}\` branch \`${base}\`.
-${focus.file ? `Crash: ${focus.file} line ${focus.line}.` : 'Fix the smallest crashing snippet.'}
+Use only the stack-matched files below. You do not have the rest of the repository.
 
 Return ONLY JSON:
 {
@@ -55,23 +57,25 @@ Return ONLY JSON:
   "prBody": "markdown",
   "files": [{
     "path": "exact/path/from/the/list.js",
-    "edits": [{ "old": "exact text copied from contents", "new": "that text with only the bug fixed" }]
+    "edits": [{ "old": "exact text copied from contents", "new": "that text with the bug fixed" }]
   }]
 }
 
 Rules:
-- Handle syntax errors AND logical bugs. Always return files with at least one edit.
+- Handle syntax errors AND logical bugs, including complex fixes that need many edits or larger changes in these files.
 - Only edit: ${JSON.stringify(allowedPaths)}
+- Do not invent other files or ask for the rest of the repo.
 - "old" must be copied from contents, including spaces.
-- One or two tiny edits. No rewrites, no extra files, no formatting.
+- Leave every __PULSE_REDACTED_N__ token unchanged. Never output passwords, API keys, private keys, tokens, or connection secrets.
+- Do not reformat unrelated code.
 
-Issue: ${issue.title}
-Culprit: ${issue.culprit || 'n/a'}
+Issue: ${payload.title}
+Culprit: ${payload.culprit || 'n/a'}
 Stack:
-${event.stack || issue.title}
+${payload.stack}
 
 Files:
-${JSON.stringify(snippets)}`;
+${JSON.stringify(files)}`;
 
   let lastError;
   for (const model of models) {
@@ -81,7 +85,7 @@ ${JSON.stringify(snippets)}`;
         contents: prompt,
         config: { responseMimeType: 'application/json' },
       });
-      return parseJsonObject(response.text || '');
+      return sanitizeAnalysis(parseJsonObject(response.text || ''));
     } catch (error) {
       lastError = error;
       if (isMissingModel(error)) continue;
@@ -93,7 +97,7 @@ ${JSON.stringify(snippets)}`;
             contents: prompt,
             config: { responseMimeType: 'application/json' },
           });
-          return parseJsonObject(response.text || '');
+          return sanitizeAnalysis(parseJsonObject(response.text || ''));
         } catch (retryError) {
           lastError = retryError;
           if (isMissingModel(retryError)) continue;

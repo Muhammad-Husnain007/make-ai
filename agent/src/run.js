@@ -4,6 +4,7 @@ import { createFixPullRequest, gatherGithubContext } from './github.js';
 import { emailFixReport, resolveNotifyEmail } from './mailer.js';
 import { applyAiFilePatch, fallbackIssueFix, githubAlreadyHasFix } from './source.js';
 import { presentIssue } from './clientView.js';
+import { assertSafeCommitFiles, isSecretPath, maskContextFile, safePatchedContents } from './secrets.js';
 
 function normalizePath(value) {
   return String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
@@ -19,11 +20,11 @@ function fixedIssueName(title) {
 }
 
 function selectPatchedFiles(aiFiles, contextFiles) {
-  const allowed = new Map(contextFiles.map((file) => [file.path, file]));
+  const allowed = new Map((contextFiles || []).filter((file) => file?.path && !isSecretPath(file.path)).map((file) => [file.path, file]));
   const out = [];
   for (const file of Array.isArray(aiFiles) ? aiFiles : []) {
     const requested = normalizePath(file?.path);
-    if (!requested || requested.includes('..') || requested.startsWith('pulse/incidents/')) continue;
+    if (!requested || requested.includes('..') || requested.startsWith('pulse/incidents/') || isSecretPath(requested)) continue;
     let target = allowed.has(requested) ? requested : null;
     if (!target) {
       const base = path.posix.basename(requested);
@@ -31,18 +32,35 @@ function selectPatchedFiles(aiFiles, contextFiles) {
     }
     if (!target) continue;
     const context = allowed.get(target);
-    const localPatched = applyAiFilePatch(context.contents, file);
-    const githubPatched = applyAiFilePatch(context.githubContents || context.contents, file);
-    const nextLocal = localPatched || (githubPatched && context.contents === (context.githubContents || context.contents) ? githubPatched : null);
-    if (!nextLocal && !githubPatched) continue;
+    const masked = maskContextFile(context);
+    if (!masked) continue;
+    const localPatched = applyAiFilePatch(masked.contents, file);
+    const githubPatched = applyAiFilePatch(masked.githubContents || masked.contents, file);
+    const nextLocal = localPatched
+      ? safePatchedContents({
+        original: context.contents,
+        maskedOriginal: masked.contents,
+        patchedMasked: localPatched,
+        secrets: masked._secrets.contents,
+      })
+      : null;
+    const nextGithub = githubPatched
+      ? safePatchedContents({
+        original: context.githubContents || context.contents,
+        maskedOriginal: masked.githubContents || masked.contents,
+        patchedMasked: githubPatched,
+        secrets: masked._secrets.githubContents,
+      })
+      : null;
+    if (!nextLocal && !nextGithub) continue;
     if (out.some((item) => item.path === target)) continue;
     out.push({
       path: target,
       contents: nextLocal || context.contents,
-      githubContents: githubPatched || nextLocal || context.githubContents || context.contents,
+      githubContents: nextGithub || nextLocal || context.githubContents || context.contents,
     });
   }
-  return out;
+  return assertSafeCommitFiles(out);
 }
 
 function requireStore(store) {
@@ -149,7 +167,11 @@ export async function fixIssue({ issue, analysis, github, agentError }) {
   let nextError = agentError;
   if (github?.ok && github.files?.length) {
     files = selectPatchedFiles(analysis.files, github.files);
-    if (!files.length) files = fallbackIssueFix(issue, github.files, analysis);
+    if (!files.length) {
+      files = assertSafeCommitFiles(
+        fallbackIssueFix(issue, github.files.filter((file) => !isSecretPath(file.path)), analysis),
+      );
+    }
     if (!files.length && githubAlreadyHasFix(issue, github.files, analysis)) {
       nextError = '';
       nextAnalysis.solution = [
@@ -182,7 +204,7 @@ export async function makeFixPr({ issue, event, github, githubConfig, files, ana
         `Repo: ${github?.repoFull || ''}`,
         event.url ? `Error URL: ${event.url}` : '',
         '',
-        'This PR changes only the crashing snippet on the client base-branch files.',
+        'Client secrets, private keys, and passwords are never sent to the model.',
       ].filter(Boolean).join('\n'),
       files,
     });

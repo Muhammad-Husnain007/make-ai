@@ -329,7 +329,7 @@ export function mergeMinimally(original, proposed) {
   }
   const merged = [...a.slice(0, start), ...b.slice(start, endB + 1), ...a.slice(endA + 1)];
   const result = restoreEol(merged, source);
-  return isSurgicalChange(source, result) ? result : null;
+  return result !== source ? result : null;
 }
 
 export function applyAiFilePatch(original, aiFile) {
@@ -338,7 +338,7 @@ export function applyAiFilePatch(original, aiFile) {
   if (edits.length) {
     let next = source;
     let applied = 0;
-    for (const edit of edits.slice(0, 5)) {
+    for (const edit of edits) {
       const patched = applySearchReplace(
         next,
         edit.old || edit.search || edit.original || edit.from,
@@ -348,8 +348,8 @@ export function applyAiFilePatch(original, aiFile) {
       next = patched;
       applied += 1;
     }
-    if (!applied) return null;
-    return isSurgicalChange(source, next) ? next : null;
+    if (!applied || next === source) return null;
+    return next;
   }
   const full = aiFile?.contents ?? aiFile?.content;
   if (full) return mergeMinimally(source, String(full));

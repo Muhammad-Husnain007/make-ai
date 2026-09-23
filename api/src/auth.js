@@ -4,6 +4,7 @@ import { nanoid } from 'nanoid';
 import { sendOtpEmail } from '@pulse/agent';
 import { db } from './db.js';
 import { acceptInvite, canSignIn, getInvite, hydrateUser, pendingInviteForEmail } from './org.js';
+import { stripPasswordFields } from './safeJson.js';
 
 const scryptAsync = promisify(scrypt);
 const SESSION_MS = 30 * 24 * 60 * 60 * 1000;
@@ -42,7 +43,8 @@ const stmts = {
 };
 
 function serializeUser(user) {
-  return hydrateUser(user);
+  if (!user) return null;
+  return stripPasswordFields(hydrateUser(user));
 }
 
 async function hashPassword(password) {

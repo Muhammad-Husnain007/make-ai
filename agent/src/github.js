@@ -1,4 +1,5 @@
 import { Octokit } from '@octokit/rest';
+import { assertSafeCommitFiles, isSecretPath } from './secrets.js';
 
 const SOURCE_EXT = /\.(?:js|jsx|ts|tsx|mjs|cjs)$/i;
 
@@ -105,7 +106,7 @@ async function listSourceFiles(target) {
   });
   return (data.tree || [])
     .filter((item) => item.type === 'blob' && SOURCE_EXT.test(item.path || ''))
-    .filter((item) => !item.path.includes('node_modules/') && !item.path.startsWith('pulse/incidents/'))
+    .filter((item) => !item.path.includes('node_modules/') && !item.path.startsWith('pulse/incidents/') && !isSecretPath(item.path))
     .map((item) => ({ path: item.path, sha: item.sha }));
 }
 
@@ -150,17 +151,17 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
       .filter((item) => item.score >= 60)
       .sort((a, b) => b.score - a.score);
     const hit = ranked.find((item) => !shopScoped || !item.path.startsWith('pulse/')) || ranked[0];
-    if (hit && !matched.includes(hit.path)) matched.push(hit.path);
+    if (hit && !matched.includes(hit.path) && !isSecretPath(hit.path)) matched.push(hit.path);
     if (matched.length >= 4) break;
   }
   for (const local of localFiles) {
-    if (local.path && !matched.includes(local.path)) matched.push(local.path);
+    if (local.path && !matched.includes(local.path) && !isSecretPath(local.path)) matched.push(local.path);
   }
   const files = (await Promise.all(matched.map(async (filePath) => {
     const local = localFiles.find((item) => item.path === filePath);
     const githubContents = await readGithubFile(target, filePath, byPath.get(filePath)?.sha);
     const contents = local?.contents || githubContents;
-    if (!contents) return null;
+    if (!contents || isSecretPath(filePath) || /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(contents) || /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(githubContents || '')) return null;
     return {
       path: filePath,
       contents,
@@ -180,13 +181,15 @@ export async function createFixPullRequest({ branch, title, body, files, github,
   const tokenMissing = createClient(github);
   if (!tokenMissing.ok) return tokenMissing;
   if (!files?.length) return { ok: false, reason: 'No files to commit' };
+  const commitFiles = assertSafeCommitFiles(files);
+  if (!commitFiles.length) return { ok: false, reason: 'Refusing to commit secret or credential files.' };
 
   const resolved = target?.ok ? target : await resolveGithubRepo(github);
   if (!resolved.ok) return resolved;
   const { octokit, owner, repo, base, baseSha, baseTreeSha } = resolved;
 
   const blobs = [];
-  for (const file of files) {
+  for (const file of commitFiles) {
     const blob = await octokit.git.createBlob({
       owner,
       repo,

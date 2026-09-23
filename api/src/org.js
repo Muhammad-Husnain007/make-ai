@@ -3,6 +3,7 @@ import { nanoid } from 'nanoid';
 import { db } from './db.js';
 import { createProject } from './store.js';
 import { enqueueInvite } from './queue.js';
+import { stripPasswordFields } from './safeJson.js';
 
 export const PLATFORM_OWNER_EMAIL = 'hasnainilyas007@gmail.com';
 export const PR_PRICE_USD = 0.05;
@@ -155,7 +156,7 @@ export function hydrateUser(user) {
     canInvite: row.role === 'owner' || Boolean(row.can_invite),
   }));
   const company = memberships[0] || null;
-  return {
+  return stripPasswordFields({
     id: user.id,
     name: user.name,
     email: user.email,
@@ -165,7 +166,7 @@ export function hydrateUser(user) {
     companies: memberships,
     canInviteCompanies: platformOwner,
     canInviteMembers: Boolean(company?.canInvite),
-  };
+  });
 }
 
 export function scopeFromUser(user) {

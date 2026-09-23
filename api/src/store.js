@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { z } from 'zod';
 import { db } from './db.js';
 import { culpritFromStack, fingerprintEvent } from './fingerprint.js';
+import { isPasswordKey, stripPasswordFields } from './safeJson.js';
 
 const ingestSchema = z.object({
   type: z.string().max(120).optional(),
@@ -588,7 +589,12 @@ function normalizeEventUser(user) {
   const email = String(raw.email || '').trim();
   const ip = String(raw.ip || '').trim();
   const stable = id || email || (ip ? `anon:${ip}` : '');
-  return { ...raw, id: stable, email, ip };
+  const cleaned = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (isPasswordKey(key)) continue;
+    cleaned[key] = value;
+  }
+  return stripPasswordFields({ ...cleaned, id: stable, email, ip });
 }
 
 export function ingestEvent(publicKey, rawBody) {
@@ -665,7 +671,7 @@ export function ingestEvent(publicKey, rawBody) {
       user_json: JSON.stringify(user),
       tags_json: JSON.stringify(body.tags || {}),
       breadcrumbs_json: JSON.stringify(body.breadcrumbs || []),
-      extra_json: JSON.stringify(body.extra || {}),
+      extra_json: JSON.stringify(stripPasswordFields(body.extra || {})),
       sdk: body.sdk || '@pulse/sdk',
     };
     stmts.insertEvent.run(event);
@@ -688,10 +694,10 @@ function serializeEvent(event) {
   };
   return {
     ...event,
-    user: parse(event.user_json, {}),
+    user: stripPasswordFields(parse(event.user_json, {})),
     tags: parse(event.tags_json, {}),
     breadcrumbs: parse(event.breadcrumbs_json, []),
-    extra: parse(event.extra_json, {}),
+    extra: stripPasswordFields(parse(event.extra_json, {})),
     release: event.release_name,
   };
 }

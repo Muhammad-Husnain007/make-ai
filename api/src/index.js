@@ -9,6 +9,7 @@ import { applyPullStates, createAdminNotification, createProject, getAgentPipeli
 import { getUserByToken, loginUser, logoutToken, readBearerToken, registerUser, requestRegisterOtp, requestResetOtp, resetPassword, verifyRegisterOtp, verifyResetOtp } from './auth.js';
 import { acceptInvite, adminOverview, canAccessProject, declineInvite, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, isPlatformOwner, listAdminCompanies, listAdminNotifications, listTeam, markAdminNotificationRead, markAllAdminNotificationsRead, removeMember, resendInvite, revokeInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
 import { enqueueScan, getQueueDashboard, isQueueEnabled, queueHealth, registerQueueBoard, startQueue } from './queue.js';
+import { stripPasswordFields } from './safeJson.js';
 import './db.js';
 
 const PORT = Number(process.env.PORT || 8787);
@@ -28,6 +29,17 @@ await app.register(rateLimit, {
   allowList: (req) => String(req.url || '').startsWith('/queues'),
 });
 app.decorateRequest('user', null);
+
+app.addHook('onSend', async (req, reply, payload) => {
+  if (typeof payload !== 'string') return payload;
+  const contentType = String(reply.getHeader('content-type') || '');
+  if (!contentType.includes('application/json')) return payload;
+  try {
+    return JSON.stringify(stripPasswordFields(JSON.parse(payload)));
+  } catch {
+    return payload;
+  }
+});
 
 app.addContentTypeParser('text/plain', { parseAs: 'string' }, (req, body, done) => {
   try {
