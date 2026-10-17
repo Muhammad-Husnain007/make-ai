@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Bell, Building2, Gauge, GitBranch, ListTodo, LogOut, Menu, Settings2, ShieldAlert, Users, X } from 'lucide-react';
+import { AlertTriangle, Bell, Building2, CheckCircle2, Gauge, GitBranch, ListTodo, LogOut, Menu, Settings2, ShieldAlert, Users, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth.jsx';
+import { getProjects } from '../lib/api.js';
 import { isErrorsSection, routes } from '../lib/routes.js';
 import { ConfirmModal } from './ConfirmModal.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
@@ -14,6 +15,7 @@ export function Shell({ children, unread = 0 }) {
   const [confirmLogout, setConfirmLogout] = useState(false);
   const [loggingOut, setLoggingOut] = useState(false);
   const [toast, setToast] = useState('');
+  const [connectedToast, setConnectedToast] = useState(false);
   const homeActive = location.pathname === routes.home;
   const issuesActive = isErrorsSection(location.pathname);
   const admin = Boolean(user?.platformOwner);
@@ -32,6 +34,21 @@ export function Shell({ children, unread = 0 }) {
     const timer = window.setTimeout(() => setToast(''), 3000);
     return () => window.clearTimeout(timer);
   }, [toast]);
+
+  useEffect(() => {
+    if (!user || user.platformOwner) return undefined;
+    let cancelled = false;
+    let timer;
+    getProjects().then(({ projects = [] }) => {
+      if (cancelled || !projects.some((project) => project.github_connected)) return;
+      setConnectedToast(true);
+      timer = window.setTimeout(() => setConnectedToast(false), 5000);
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+      if (timer) window.clearTimeout(timer);
+    };
+  }, [user?.email]);
 
   const confirmSignOut = async () => {
     setLoggingOut(true);
@@ -192,6 +209,12 @@ export function Shell({ children, unread = 0 }) {
       {toast && (
         <div role="status" className="fixed bottom-5 right-5 z-[60] rounded-xl border border-white/10 bg-ink-900 px-4 py-3 text-sm text-zinc-100 shadow-2xl">
           {toast}
+        </div>
+      )}
+      {connectedToast && (
+        <div role="status" className="fixed bottom-5 left-5 z-[60] flex items-center gap-2 rounded-xl border border-emerald-400/20 bg-ink-900 px-4 py-3 text-sm text-zinc-100 shadow-2xl">
+          <CheckCircle2 size={18} className="text-emerald-400" />
+          Woo! Connected to Pulse
         </div>
       )}
     </div>

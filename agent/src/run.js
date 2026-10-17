@@ -581,8 +581,9 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
 export function shouldRunAgent(result) {
   const level = result.event?.level || result.issue?.level;
   if (!['error', 'fatal'].includes(level)) return false;
-  if (!result.isNew && !result.reopened) return false;
   if (result.issue?.agent_status === 'running') return false;
+  const retryFailed = result.issue?.agent_status === 'failed';
+  if (!result.isNew && !result.reopened && !(retryFailed && !result.issue?.pr_url)) return false;
   if (result.issue?.agent_status === 'done' && result.issue?.pr_url && !result.reopened) return false;
   return true;
 }

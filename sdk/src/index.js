@@ -86,15 +86,17 @@ export function createPulseClient(options = {}) {
           const ok = navigator.sendBeacon(state.dsn, new Blob([payload], { type: 'application/json' }));
           if (ok) continue;
         }
-        await fetch(state.dsn, {
+        const response = await fetch(state.dsn, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,
           keepalive: true,
         });
+        if (!response.ok) throw new Error(`Pulse ingest failed (${response.status})`);
       }
     } catch {
       state.queue.unshift(...batch);
+      console.warn(`[Pulse SDK] Event delivery failed; ${batch.length} event(s) queued for retry`);
     } finally {
       state.sending = false;
     }
@@ -155,7 +157,9 @@ export function createPulseClient(options = {}) {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
-    }).catch(() => {});
+    }).then((response) => {
+      if (!response.ok) console.warn(`[Pulse SDK] Settings registration failed (${response.status})`);
+    }).catch(() => console.warn('[Pulse SDK] Settings registration could not reach the Pulse server'));
   }
 
   function installNode() {
