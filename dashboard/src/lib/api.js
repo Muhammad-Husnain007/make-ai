@@ -68,6 +68,7 @@ export const getIssues = (params = {}) => {
   ).toString();
   return api(`/api/issues${query ? `?${query}` : ''}`);
 };
+export const getPipelines = () => api('/api/pipelines');
 export const getIssue = (id) => api(`/api/issues/${id}`);
 export const patchIssue = (id, status) => api(`/api/issues/${id}`, { method: 'PATCH', body: { status } });
 export const deleteIssue = (id) => api(`/api/issues/${id}`, { method: 'DELETE' });

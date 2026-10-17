@@ -9,7 +9,7 @@ export const routes = {
   pullRequestsMerged: '/pull-requests/merged',
   pullRequestsClosed: '/pull-requests/closed',
   performance: '/insights/performance',
-  memoryLeaks: '/insights/memory-leaks',
+  pipelines: '/insights/pipelines',
   integrations: '/integrations',
   organization: '/organization',
   accounts: '/admin/accounts',

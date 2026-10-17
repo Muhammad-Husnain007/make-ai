@@ -1,5 +1,5 @@
 import { Children, useState } from 'react';
-import { Link, Navigate, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, Navigate, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { CheckCircle2, Eye, EyeOff, ShieldAlert } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle.jsx';
 import { requestRegisterOtp, requestResetOtp, verifyRegisterOtp, verifyResetOtp } from '../lib/api.js';
@@ -150,6 +150,7 @@ function StepActions({ step, last, busy, done, lastLabel, onBack }) {
 
 export function LoginPage() {
   const { user, ready, login, resetPassword } = useAuth();
+  const location = useLocation();
   const navigate = useNavigate();
   const [params] = useSearchParams();
   const inviteToken = params.get('invite') || sessionStorage.getItem('pulse_invite') || '';
@@ -270,7 +271,8 @@ export function LoginPage() {
   }
 
   return (
-    <AuthShell
+    <>
+      <AuthShell
       title="Sign in"
       subtitle="Login is only for people who already have Pulse access."
       footer={<>No account? <Link to={inviteToken ? signUpPath({ invite: inviteToken }) : routes.signUp} className="text-orange-300 hover:underline">Register</Link></>}
@@ -313,7 +315,13 @@ export function LoginPage() {
           {busy ? 'Signing in…' : 'Login'}
         </button>
       </form>
-    </AuthShell>
+      </AuthShell>
+      {location.state?.toast && (
+        <div role="status" className="fixed bottom-5 right-5 z-50 rounded-xl border border-white/10 bg-ink-900 px-4 py-3 text-sm text-zinc-100 shadow-2xl">
+          {location.state.toast}
+        </div>
+      )}
+    </>
   );
 }
 

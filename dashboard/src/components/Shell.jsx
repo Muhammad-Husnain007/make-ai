@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Bell, Building2, Gauge, ListTodo, LogOut, MemoryStick, Menu, Settings2, ShieldAlert, Users, X } from 'lucide-react';
+import { AlertTriangle, Bell, Building2, Gauge, GitBranch, ListTodo, LogOut, Menu, Settings2, ShieldAlert, Users, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { isErrorsSection, routes } from '../lib/routes.js';
+import { ConfirmModal } from './ConfirmModal.jsx';
 import { ThemeToggle } from './ThemeToggle.jsx';
 
 export function Shell({ children, unread = 0 }) {
@@ -10,6 +11,9 @@ export function Shell({ children, unread = 0 }) {
   const navigate = useNavigate();
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmLogout, setConfirmLogout] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [toast, setToast] = useState('');
   const homeActive = location.pathname === routes.home;
   const issuesActive = isErrorsSection(location.pathname);
   const admin = Boolean(user?.platformOwner);
@@ -22,6 +26,21 @@ export function Shell({ children, unread = 0 }) {
     document.body.style.overflow = menuOpen ? 'hidden' : '';
     return () => { document.body.style.overflow = ''; };
   }, [menuOpen]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timer = window.setTimeout(() => setToast(''), 3000);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
+
+  const confirmSignOut = async () => {
+    setLoggingOut(true);
+    await logout();
+    navigate(routes.signIn, {
+      replace: true,
+      state: { toast: 'You have been logged out successfully.' },
+    });
+  };
 
   const linkClass = (active) => `flex items-center gap-2 rounded-lg px-3 py-2 ${active ? 'bg-white/8 text-white' : 'text-zinc-400 hover:bg-white/4 hover:text-white'}`;
 
@@ -125,8 +144,8 @@ export function Shell({ children, unread = 0 }) {
                 <NavLink to={routes.performance} className={({ isActive }) => linkClass(isActive || location.pathname.startsWith('/insights/performance'))}>
                   <Gauge size={16} /> Performance
                 </NavLink>
-                <NavLink to={routes.memoryLeaks} className={({ isActive }) => linkClass(isActive)}>
-                  <MemoryStick size={16} /> Memory leaks
+                <NavLink to={routes.pipelines} className={({ isActive }) => linkClass(isActive)}>
+                  <GitBranch size={16} /> CI/CD pipelines
                 </NavLink>
                 <NavLink to={routes.integrations} className={({ isActive }) => linkClass(isActive)}>
                   <Settings2 size={16} /> Integrations
@@ -146,10 +165,7 @@ export function Shell({ children, unread = 0 }) {
             <ThemeToggle labeled />
             <button
               type="button"
-              onClick={async () => {
-                await logout();
-                navigate(routes.signIn, { replace: true });
-              }}
+              onClick={() => setConfirmLogout(true)}
               className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-zinc-400 hover:bg-white/4 hover:text-white"
             >
               <LogOut size={16} /> Logout
@@ -158,6 +174,26 @@ export function Shell({ children, unread = 0 }) {
         </aside>
         <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden">{children}</main>
       </div>
+      {confirmLogout && (
+        <ConfirmModal
+          title="Log out of Pulse?"
+          body="You will need to sign in again to access your dashboard."
+          confirmLabel="Log out"
+          busy={loggingOut}
+          danger
+          onConfirm={confirmSignOut}
+          onCancel={() => {
+            if (loggingOut) return;
+            setConfirmLogout(false);
+            setToast('Logout cancelled.');
+          }}
+        />
+      )}
+      {toast && (
+        <div role="status" className="fixed bottom-5 right-5 z-[60] rounded-xl border border-white/10 bg-ink-900 px-4 py-3 text-sm text-zinc-100 shadow-2xl">
+          {toast}
+        </div>
+      )}
     </div>
   );
 }

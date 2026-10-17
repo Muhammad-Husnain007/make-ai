@@ -1,4 +1,4 @@
-import { Ban, CheckCircle2, CircleDot, Gauge, GitMerge, GitPullRequest, MemoryStick } from 'lucide-react';
+import { Ban, CheckCircle2, CircleDot, Gauge, GitBranch, GitMerge, GitPullRequest } from 'lucide-react';
 import { routes } from './routes.js';
 
 export const ISSUE_VIEWS = [
@@ -23,12 +23,12 @@ export const CATEGORY_VIEWS = [
     icon: Gauge,
   },
   {
-    id: 'memory-leak',
-    label: 'Memory leak',
-    to: routes.memoryLeaks,
-    empty: 'No memory leak or heap issues yet.',
-    blurb: 'Heap growth, leaks, and out-of-memory errors from connected clients.',
-    icon: MemoryStick,
+    id: 'pipelines',
+    label: 'CI/CD pipelines',
+    to: routes.pipelines,
+    empty: 'No CI/CD workflows found in connected GitHub repositories.',
+    blurb: 'GitHub Actions workflows and their latest run status.',
+    icon: GitBranch,
   },
 ];
 

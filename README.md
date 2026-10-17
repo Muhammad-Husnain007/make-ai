@@ -13,11 +13,12 @@ Pulse traces client crashes, groups them, opens a GitHub PR on the **client repo
 
 ## Run Pulse
 
+Use Node.js 22 LTS. The API uses `better-sqlite3`, which has native binaries for Node 22; newer Node releases may require local Python and C++ build tools.
+
 ```bash
-cd pulse
+npm install
 npm run setup
-npm run build -w dashboard
-npm start
+npm run dev
 ```
 
 Put production keys in `.env` (`NODE_ENV`, `HOST`, `PORT`, `DASHBOARD_URL`, `GEMINI_API_KEY`, `SMTP_USER`, `SMTP_PASS`, `ISQUEUEENABLE`, `REDIS_URL`). Create a project in the dashboard and copy that project's DSN into the client app.

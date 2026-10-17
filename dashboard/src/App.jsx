@@ -7,6 +7,7 @@ import { HomePage } from './pages/HomePage.jsx';
 import { InvitePage } from './pages/InvitePage.jsx';
 import { IssueDetail } from './pages/IssueDetail.jsx';
 import { IssuesPage } from './pages/IssuesPage.jsx';
+import { PipelinesPage } from './pages/PipelinesPage.jsx';
 import { JobsPage } from './pages/JobsPage.jsx';
 import { LoginPage, RegisterPage, RegisterThanksPage } from './pages/AuthPages.jsx';
 import { CompaniesPage } from './pages/CompaniesPage.jsx';
@@ -91,7 +92,7 @@ function AuthedApp() {
         <Route path={routes.pullRequestsMerged} element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="merge-pull" /></ClientOnly>} />
         <Route path={routes.pullRequestsClosed} element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="closed-pull" /></ClientOnly>} />
         <Route path={routes.performance} element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="performance" /></ClientOnly>} />
-        <Route path={routes.memoryLeaks} element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="memory-leak" /></ClientOnly>} />
+        <Route path={routes.pipelines} element={<ClientOnly><PipelinesPage refreshKey={refreshKey} /></ClientOnly>} />
         <Route path={routes.integrations} element={<ClientOnly><SetupPage /></ClientOnly>} />
         <Route path={routes.organization} element={<ClientOnly><TeamPage /></ClientOnly>} />
         <Route path="/companies/:id" element={<LegacyAccountRedirect />} />
@@ -105,7 +106,8 @@ function AuthedApp() {
         <Route path="/merged" element={<PreserveRedirect to={routes.pullRequestsMerged} />} />
         <Route path="/closed" element={<PreserveRedirect to={routes.pullRequestsClosed} />} />
         <Route path="/performance" element={<PreserveRedirect to={routes.performance} />} />
-        <Route path="/memory-leak" element={<PreserveRedirect to={routes.memoryLeaks} />} />
+        <Route path="/memory-leak" element={<PreserveRedirect to={routes.pipelines} />} />
+        <Route path="/insights/memory-leaks" element={<PreserveRedirect to={routes.pipelines} />} />
         <Route path="/setup" element={<PreserveRedirect to={routes.integrations} />} />
         <Route path="/team" element={<PreserveRedirect to={routes.organization} />} />
       </Routes>

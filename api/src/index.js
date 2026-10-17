@@ -8,7 +8,7 @@ import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Server } from 'socket.io';
 import { listPullStates, presentIssue, shouldRunAgent } from '@pulse/agent';
-import { applyPullStates, createAdminNotification, createProject, deleteIssue, getAgentPipeline, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listIssues, listProjects, saveAgentPipeline, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
+import { applyPullStates, createAdminNotification, createProject, deleteIssue, getAgentPipeline, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listGithubProjectsForScope, listIssues, listProjects, saveAgentPipeline, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
 import { getUserByToken, loginUser, logoutToken, readBearerToken, registerUser, requestRegisterOtp, requestResetOtp, resetPassword, verifyRegisterOtp, verifyResetOtp } from './auth.js';
 import { acceptInvite, adminOverview, canAccessProject, declineInvite, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, isPlatformOwner, listAdminCompanies, listAdminNotifications, listTeam, markAdminNotificationRead, markAllAdminNotificationsRead, removeMember, resendInvite, revokeInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
 import { enqueueScan, getQueueDashboard, isQueueEnabled, queueHealth, registerQueueBoard, startQueue } from './queue.js';
@@ -422,6 +422,56 @@ app.get('/api/issues', async (req) => {
   const { projectId, status, environment, q, limit } = req.query || {};
   const issues = listIssues({ ...projectFilter(req.user, projectId), status, environment, q, limit });
   return { issues: issues.map((issue) => presentForUser(req.user, issue)) };
+});
+
+app.get('/api/pipelines', async (req) => {
+  if (req.user?.platformOwner) return { pipelines: [], configuredRepos: 0 };
+  const projects = listGithubProjectsForScope(scopeFromUser(req.user));
+  const results = await Promise.all(projects.map(async (project) => {
+    const [owner, repo] = String(project.github_repo || '').split('/');
+    if (!owner || !repo) return { pipelines: [], unavailableRepo: project.github_repo || project.name };
+    const headers = {
+      Accept: 'application/vnd.github+json',
+      Authorization: `Bearer ${project.github_token}`,
+      'X-GitHub-Api-Version': '2022-11-28',
+    };
+    try {
+      const [workflowsResponse, runsResponse] = await Promise.all([
+        fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/workflows?per_page=100`, { headers }),
+        fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/actions/runs?per_page=100`, { headers }),
+      ]);
+      if (!workflowsResponse.ok || !runsResponse.ok) return { pipelines: [], unavailableRepo: project.github_repo };
+      const [workflowData, runData] = await Promise.all([workflowsResponse.json(), runsResponse.json()]);
+      const runsByWorkflow = new Map();
+      for (const run of runData.workflow_runs || []) {
+        if (!runsByWorkflow.has(run.workflow_id)) runsByWorkflow.set(run.workflow_id, run);
+      }
+      const pipelines = (workflowData.workflows || []).map((workflow) => {
+        const run = runsByWorkflow.get(workflow.id);
+        return {
+          id: `${project.id}:${workflow.id}`,
+          name: workflow.name || 'GitHub Actions workflow',
+          repo: project.github_repo,
+          project: project.name,
+          state: workflow.state || 'unknown',
+          status: run?.status || 'idle',
+          conclusion: run?.conclusion || '',
+          branch: run?.head_branch || '',
+          commit: run?.display_title || '',
+          updatedAt: run?.updated_at || workflow.updated_at || '',
+          url: run?.html_url || workflow.html_url || `https://github.com/${owner}/${repo}/actions`,
+        };
+      });
+      return { pipelines };
+    } catch {
+      return { pipelines: [], unavailableRepo: project.github_repo };
+    }
+  }));
+  return {
+    pipelines: results.flatMap((result) => result.pipelines),
+    unavailableRepos: results.flatMap((result) => result.unavailableRepo || []),
+    configuredRepos: projects.length,
+  };
 });
 
 app.get('/api/issues/:id', async (req, reply) => {

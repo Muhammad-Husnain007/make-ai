@@ -275,6 +275,12 @@ export function listGithubProjects() {
   return stmts.listProjects.all().filter((project) => project.github_token && project.github_repo);
 }
 
+export function listGithubProjectsForScope(scope = { all: true }) {
+  if (scope.all) return listGithubProjects();
+  if (!scope.projectIds?.length) return [];
+  return scope.projectIds.map((id) => stmts.projectById.get(id)).filter((project) => project?.github_token && project?.github_repo);
+}
+
 export function createProject(name, notifyEmail, companyId = null) {
   const project = {
     id: nanoid(),
@@ -439,11 +445,6 @@ export function listIssues({ projectId, projectIds, status, environment, q, limi
     clauses.push(`(
       lower(i.title) LIKE '%timeout%' OR lower(i.title) LIKE '%slow%' OR lower(i.title) LIKE '%latency%'
       OR lower(i.title) LIKE '%performance%' OR lower(i.culprit) LIKE '%timeout%'
-    )`);
-  } else if (status === 'memory-leak') {
-    clauses.push(`(
-      lower(i.title) LIKE '%memory%' OR lower(i.title) LIKE '%heap%' OR lower(i.title) LIKE '%leak%'
-      OR lower(i.title) LIKE '%oom%'
     )`);
   } else if (status && status !== 'all') {
     clauses.push('i.status = ?');

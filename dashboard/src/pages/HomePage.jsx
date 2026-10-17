@@ -51,7 +51,7 @@ export function HomePage({ refreshKey }) {
   return (
     <div className="p-4 sm:p-6 lg:p-8">
       <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">Pulse</h1>
-      <p className="mt-1 mb-6 text-sm text-zinc-500 sm:mb-8">Open issues, pull requests, performance, and memory leaks from connected clients.</p>
+      <p className="mt-1 mb-6 text-sm text-zinc-500 sm:mb-8">Open issues, pull requests, performance, and CI/CD workflows from connected GitHub repositories.</p>
       {!user?.platformOwner && !user?.company && (
         <div className="mb-8 rounded-2xl border border-orange-400/20 bg-orange-500/5 p-5 text-sm text-zinc-300">
           Waiting for a Pulse invitation. The Pulse owner sends a company invite to your email. After you accept, you own that dashboard and can invite your members.
