@@ -115,8 +115,20 @@ async function startAgent(issue, event, force = false, project = null) {
     force,
     project,
     store: agentStore,
-  }).catch((error) => {
+  }).catch(async (error) => {
     app.log.error({ err: error }, 'Pulse AI agent failed');
+    try {
+      const message = error?.message || 'AI fix failed unexpectedly. Click Run AI fix to try again.';
+      const failed = await agentStore.saveAgentResult(issue.id, {
+        status: 'failed',
+        summary: 'AI fix failed. Click Run AI fix to try again.',
+        solution: message,
+        agentError: message,
+      });
+      if (failed) emitIssue(app.io, failed, project || await getProject(failed.project_id));
+    } catch (saveError) {
+      app.log.error({ err: saveError }, 'Pulse AI agent failure state could not be saved');
+    }
   }));
 }
 

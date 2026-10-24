@@ -108,7 +108,7 @@ export async function analyzeWithGemini({ issue, event, contextFiles, repo, base
     contents: file.contents,
   }));
   const prompt = `You are Pulse. Fix this production crash with a GitHub PR against \`${repo}\` branch \`${base}\`.
-Use only the stack-matched files below. You do not have the rest of the repository.
+The source files below were fetched from the configured GitHub repository. Trace the stack from the first application frame through the matched files, compare adjacent frames to identify the failing call path, and use the reported line/column to inspect the relevant code. Do not infer source from a local checkout or assume local files are available.
 
 Return ONLY JSON:
 {
@@ -125,6 +125,7 @@ Return ONLY JSON:
 
 Rules:
 - Handle syntax errors AND logical bugs, including complex fixes that need many edits or larger changes in these files.
+- Trace the failure across all supplied stack-matched files before choosing a root cause; explain how the failing frame leads to the bug.
 - Only edit: ${JSON.stringify(allowedPaths)}
 - Do not invent other files or ask for the rest of the repo.
 - "old" must be copied from contents, including spaces.

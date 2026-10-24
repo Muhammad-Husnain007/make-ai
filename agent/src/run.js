@@ -47,30 +47,25 @@ function selectPatchedFiles(aiFiles, contextFiles) {
     const context = allowed.get(target);
     const masked = maskContextFile(context);
     if (!masked) continue;
-    const localPatched = applyAiFilePatch(masked.contents, file);
-    const githubPatched = applyAiFilePatch(masked.githubContents || masked.contents, file);
-    const nextLocal = localPatched
+    const githubSource = context.githubContents || context.contents;
+    const maskedGithubSource = masked.githubContents || masked.contents;
+    const githubPatched = applyAiFilePatch(maskedGithubSource, file);
+    const nextContents = githubPatched
       ? safePatchedContents({
-        original: context.contents,
-        maskedOriginal: masked.contents,
-        patchedMasked: localPatched,
-        secrets: masked._secrets.contents,
-      })
-      : null;
-    const nextGithub = githubPatched
-      ? safePatchedContents({
-        original: context.githubContents || context.contents,
-        maskedOriginal: masked.githubContents || masked.contents,
+        original: githubSource,
+        maskedOriginal: maskedGithubSource,
         patchedMasked: githubPatched,
         secrets: masked._secrets.githubContents,
       })
       : null;
-    if (!nextLocal && !nextGithub) continue;
+    if (!nextContents) continue;
     if (out.some((item) => item.path === target)) continue;
     out.push({
       path: target,
-      contents: nextLocal || context.contents,
-      githubContents: nextGithub || nextLocal || context.githubContents || context.contents,
+      contents: nextContents,
+      githubContents: nextContents,
+      source: 'github',
+      baseSha: context.baseSha,
     });
   }
   return assertSafeCommitFiles(out);

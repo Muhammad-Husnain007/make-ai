@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { Octokit } from '@octokit/rest';
 import { assertSafeCommitFiles, extractSecretStackPaths, isSecretPath, publicSecretLabel } from './secrets.js';
 
@@ -15,6 +16,14 @@ function createClient(github = {}) {
   const repoFull = normalizeGithubRepo(github.githubRepo || github.github_repo);
   if (!token) return { ok: false, reason: 'Client GitHub token missing. Set GITHUB_TOKEN in the client app.' };
   if (!repoFull.includes('/')) return { ok: false, reason: 'Client GitHub repo missing. Set GITHUB_REPO=owner/name in the client app.' };
+  const tokenSource = github.githubToken ? 'githubToken' : 'github_token';
+  const tokenFingerprint = createHash('sha256').update(token).digest('hex').slice(0, 12);
+  console.log('[Pulse agent] GitHub token diagnostic', {
+    repo: repoFull,
+    source: tokenSource,
+    length: token.length,
+    fingerprint: `sha256:${tokenFingerprint}`,
+  });
   const [owner, repo] = repoFull.split('/');
   return { ok: true, octokit: new Octokit({ auth: token }), owner, repo, repoFull };
 }
@@ -94,11 +103,18 @@ export function extractStackPaths(stack, culprit = '') {
 }
 
 function scoreRepoPath(hint, repoPath) {
-  const needle = String(hint || '').replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase();
-  const hay = String(repoPath || '').toLowerCase();
+  const needle = String(hint || '').replace(/\\/g, '/').replace(/^\/+/, '').toLowerCase().split(/[?#]/, 1)[0];
+  const hay = String(repoPath || '').replace(/\\/g, '/').toLowerCase();
   if (!needle || !hay) return 0;
   if (hay === needle) return 100;
   if (needle.endsWith(`/${hay}`) || hay.endsWith(`/${needle}`)) return 95;
+  const hintParts = needle.split('/').filter(Boolean);
+  const repoParts = hay.split('/').filter(Boolean);
+  let sharedTail = 0;
+  while (sharedTail < hintParts.length && sharedTail < repoParts.length
+    && hintParts[hintParts.length - 1 - sharedTail] === repoParts[repoParts.length - 1 - sharedTail]) sharedTail += 1;
+  if (sharedTail >= 3) return 88 + Math.min(sharedTail, 5);
+  if (sharedTail === 2) return 72;
   const markers = ['shop-api/', 'pulse/', 'src/'];
   for (const marker of markers) {
     const index = needle.lastIndexOf(marker);
@@ -171,7 +187,7 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
     }
     const ranked = tree
       .map((item) => ({ path: item.path, score: scoreRepoPath(hint, item.path) }))
-      .filter((item) => item.score >= 60)
+      .filter((item) => item.score >= 70)
       .sort((a, b) => b.score - a.score);
     const hit = ranked.find((item) => !shopScoped || !item.path.startsWith('pulse/')) || ranked[0];
     if (hit && isSecretPath(hit.path)) {
@@ -180,7 +196,7 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
       continue;
     }
     if (hit && !matched.includes(hit.path) && !isSecretPath(hit.path)) matched.push(hit.path);
-    if (matched.length >= 4) break;
+    if (matched.length >= 8) break;
   }
   const files = (await Promise.all(matched.map(async (filePath) => {
     const contents = await readGithubFile(target, filePath, byPath.get(filePath)?.sha);
@@ -189,6 +205,8 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
       path: filePath,
       contents,
       githubContents: contents,
+      source: 'github',
+      baseSha: target.baseSha,
     };
   }))).filter(Boolean);
   const unmatchedReason = files.length || secretFiles.length
