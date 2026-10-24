@@ -13,7 +13,6 @@ export const routes = {
   integrations: '/integrations',
   organization: '/organization',
   accounts: '/admin/accounts',
-  queues: '/admin/queues',
   alerts: '/admin/alerts',
 };
 

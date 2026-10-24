@@ -26,6 +26,21 @@ function usableBranch(value) {
     : '';
 }
 
+export function explainGithubWriteError(error, repoFull = '') {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const repo = repoFull ? ` for ${repoFull}` : '';
+  if (status === 401) {
+    return `GitHub rejected the token${repo} (401). Replace the project's GitHub token and reconnect the repository.`;
+  }
+  if (status === 403) {
+    return `GitHub denied permission to create the fix${repo} (403). For a fine-grained personal access token, grant access to this exact repository and enable Contents: Read and write and Pull requests: Read and write. For an organization repository, confirm the organization approved the token and any required SSO authorization. Then update the token in the Pulse project and retry the fix.`;
+  }
+  if (status === 404) {
+    return `GitHub could not access the repository or branch${repo} (404). Check the repository name, token repository access, and configured base branch.`;
+  }
+  return error?.message || 'GitHub could not create the fix pull request.';
+}
+
 const repoCache = new Map();
 
 export async function resolveGithubRepo(github = {}) {
@@ -222,91 +237,206 @@ export async function createFixPullRequest({ branch, title, body, files, github,
   if (!resolved.ok) return resolved;
   const { octokit, owner, repo, base, baseSha, baseTreeSha } = resolved;
 
-  const blobs = [];
-  for (const file of commitFiles) {
-    const blob = await octokit.git.createBlob({
-      owner,
-      repo,
-      content: file.githubContents || file.contents,
-      encoding: 'utf-8',
-    });
-    blobs.push({
-      path: file.path,
-      mode: '100644',
-      type: 'blob',
-      sha: blob.data.sha,
-    });
-  }
-
-  const tree = await octokit.git.createTree({
-    owner,
-    repo,
-    base_tree: baseTreeSha,
-    tree: blobs,
-  });
-  if (tree.data.sha === baseTreeSha) {
-    return { ok: true, unchanged: true, url: '', base, repo: `${owner}/${repo}` };
-  }
-  const commit = await octokit.git.createCommit({
-    owner,
-    repo,
-    message: (title || 'fix: production error').slice(0, 80),
-    tree: tree.data.sha,
-    parents: [baseSha],
-  });
-
   try {
-    await octokit.git.createRef({
-      owner,
-      repo,
-      ref: `refs/heads/${branch}`,
-      sha: commit.data.sha,
-    });
-  } catch (error) {
-    if (error.status !== 422) throw error;
-    await octokit.git.updateRef({
-      owner,
-      repo,
-      ref: `heads/${branch}`,
-      sha: commit.data.sha,
-      force: true,
-    });
-  }
+    const blobs = [];
+    for (const file of commitFiles) {
+      const blob = await octokit.git.createBlob({
+        owner,
+        repo,
+        content: file.githubContents || file.contents,
+        encoding: 'utf-8',
+      });
+      blobs.push({
+        path: file.path,
+        mode: '100644',
+        type: 'blob',
+        sha: blob.data.sha,
+      });
+    }
 
-  try {
-    const pr = await octokit.pulls.create({
+    const tree = await octokit.git.createTree({
       owner,
       repo,
-      title,
-      head: branch,
-      base,
-      body,
+      base_tree: baseTreeSha,
+      tree: blobs,
     });
-    return {
-      ok: true,
-      url: pr.data.html_url,
-      number: pr.data.number,
-      base,
-      repo: `${owner}/${repo}`,
-    };
-  } catch (error) {
-    if (error.status !== 422) throw error;
-    const { data: existing } = await octokit.pulls.list({
+    if (tree.data.sha === baseTreeSha) {
+      return { ok: true, unchanged: true, url: '', base, repo: `${owner}/${repo}` };
+    }
+    const commit = await octokit.git.createCommit({
       owner,
       repo,
-      head: `${owner}:${branch}`,
-      state: 'open',
+      message: (title || 'fix: production error').slice(0, 80),
+      tree: tree.data.sha,
+      parents: [baseSha],
     });
-    if (existing[0]) {
+
+    try {
+      await octokit.git.createRef({
+        owner,
+        repo,
+        ref: `refs/heads/${branch}`,
+        sha: commit.data.sha,
+      });
+    } catch (error) {
+      if (error.status === 422) {
+        return {
+          ok: false,
+          reason: `GitHub branch ${branch} already exists in ${owner}/${repo}. Pulse did not overwrite it. Delete that abandoned branch or use a new issue title, then retry.`,
+        };
+      }
+      throw error;
+    }
+
+    try {
+      const pr = await octokit.pulls.create({
+        owner,
+        repo,
+        title,
+        head: branch,
+        base,
+        body,
+      });
       return {
         ok: true,
-        url: existing[0].html_url,
-        number: existing[0].number,
+        url: pr.data.html_url,
+        number: pr.data.number,
         base,
         repo: `${owner}/${repo}`,
       };
+    } catch (error) {
+      if (error.status !== 422) throw error;
+      const { data: existing } = await octokit.pulls.list({
+        owner,
+        repo,
+        head: `${owner}:${branch}`,
+        state: 'open',
+      });
+      if (existing[0]) {
+        return {
+          ok: true,
+          url: existing[0].html_url,
+          number: existing[0].number,
+          base,
+          repo: `${owner}/${repo}`,
+        };
+      }
+      return { ok: false, reason: error.message || 'Unable to open pull request' };
     }
-    return { ok: false, reason: error.message || 'Unable to open pull request' };
+    } catch (error) {
+    return { ok: false, reason: explainGithubWriteError(error, `${owner}/${repo}`) };
+  }
+}
+
+export async function commitFixBranch({ branch, title, files, github }) {
+  const client = createClient(github);
+  if (!client.ok) return client;
+  if (!files?.length) return { ok: false, reason: 'No files to commit' };
+  const commitFiles = assertSafeCommitFiles(files);
+  if (!commitFiles.length) return { ok: false, reason: 'Refusing to commit secret or credential files.' };
+  const { octokit, owner, repo, repoFull } = client;
+
+  try {
+    const { data: repoData } = await octokit.repos.get({ owner, repo });
+    let base = usableBranch(github.githubBaseBranch || github.github_base_branch) || repoData.default_branch;
+    let baseRef;
+    try {
+      ({ data: baseRef } = await octokit.git.getRef({ owner, repo, ref: `heads/${base}` }));
+    } catch (error) {
+      if (error.status !== 404 || base === repoData.default_branch) throw error;
+      base = repoData.default_branch;
+      ({ data: baseRef } = await octokit.git.getRef({ owner, repo, ref: `heads/${base}` }));
+    }
+    const { data: parent } = await octokit.git.getCommit({ owner, repo, commit_sha: baseRef.object.sha });
+    const treeEntries = [];
+    for (const file of commitFiles) {
+      const { data: blob } = await octokit.git.createBlob({
+        owner,
+        repo,
+        content: file.githubContents || file.contents,
+        encoding: 'utf-8',
+      });
+      treeEntries.push({ path: file.path, mode: '100644', type: 'blob', sha: blob.sha });
+    }
+    const { data: tree } = await octokit.git.createTree({
+      owner,
+      repo,
+      base_tree: parent.tree.sha,
+      tree: treeEntries,
+    });
+    const { data: commit } = await octokit.git.createCommit({
+      owner,
+      repo,
+      message: (title || 'fix: production error').slice(0, 80),
+      tree: tree.sha,
+      parents: [baseRef.object.sha],
+    });
+    await octokit.git.createRef({ owner, repo, ref: `refs/heads/${branch}`, sha: commit.sha });
+    return { ok: true, branch, sha: commit.sha, base, repo: repoFull };
+  } catch (error) {
+    if (error.status === 422) {
+      return { ok: false, reason: `GitHub could not create candidate branch ${branch} in ${repoFull}; it may already exist.` };
+    }
+    return { ok: false, reason: explainGithubWriteError(error, repoFull) };
+  }
+}
+
+export async function runGithubWorkflow({ branch, sha, github, workflow = 'pulse-validation.yml', timeoutMs = 15 * 60_000 }) {
+  const client = createClient(github);
+  if (!client.ok) return client;
+  const { octokit, owner, repo, repoFull } = client;
+  try {
+    await octokit.actions.createWorkflowDispatch({ owner, repo, workflow_id: workflow, ref: branch });
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const { data } = await octokit.actions.listWorkflowRuns({
+        owner,
+        repo,
+        workflow_id: workflow,
+        branch,
+        event: 'workflow_dispatch',
+        per_page: 20,
+      });
+      const run = data.workflow_runs.find((item) => item.head_sha === sha);
+      if (run?.status === 'completed') {
+        const ok = run.conclusion === 'success';
+        return {
+          ok,
+          url: run.html_url,
+          conclusion: run.conclusion || 'unknown',
+          retryable: !ok,
+          reason: ok ? '' : `GitHub Actions validation ${run.conclusion || 'failed'}: ${run.html_url}`,
+        };
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10_000));
+    }
+    return { ok: false, retryable: false, reason: `GitHub Actions validation did not finish within ${Math.round(timeoutMs / 60_000)} minutes for ${repoFull}.` };
+  } catch (error) {
+    const status = Number(error?.status || 0);
+    const reason = status === 404
+      ? `GitHub Actions could not find ${workflow} on the repository's default branch. Add and enable that workflow before Pulse can open tested PRs.`
+      : status === 403
+        ? `GitHub Actions denied workflow dispatch for ${repoFull} (403). Grant the project's fine-grained token Actions: Read and write, in addition to Contents and Pull requests: Read and write.`
+        : explainGithubWriteError(error, repoFull);
+    return { ok: false, retryable: false, reason };
+  }
+}
+
+export async function openFixPullRequest({ branch, title, body, github, target }) {
+  const client = createClient(github);
+  if (!client.ok) return client;
+  const resolved = target?.ok ? target : await resolveGithubRepo(github);
+  if (!resolved.ok) return resolved;
+  const { octokit, owner, repo, base, repoFull } = resolved;
+  try {
+    const pr = await octokit.pulls.create({ owner, repo, title, head: branch, base, body });
+    return { ok: true, url: pr.data.html_url, number: pr.data.number, base, repo: repoFull };
+  } catch (error) {
+    if (error.status === 422) {
+      const { data: existing } = await octokit.pulls.list({ owner, repo, head: `${owner}:${branch}`, state: 'open' });
+      if (existing[0]) return { ok: true, url: existing[0].html_url, number: existing[0].number, base, repo: repoFull };
+    }
+    return { ok: false, reason: explainGithubWriteError(error, repoFull) };
   }
 }
 

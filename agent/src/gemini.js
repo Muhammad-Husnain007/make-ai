@@ -5,6 +5,19 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 export const isRetryableAi = (error) => /UNAVAILABLE|503|high demand|RESOURCE_EXHAUSTED|429|overloaded/i.test(error?.message || String(error || ''));
 const isMissingModel = (error) => /NOT_FOUND|404|not found|no longer available/i.test(error?.message || String(error || ''));
 
+function getGeminiApiKey() {
+  return String(process.env.AI_API_KEY || '').trim();
+}
+
+function getGeminiModels() {
+  const configured = process.env.PRIMARY_GEMINI_MODEL || process.env.AI_MODEL || 'gemini-3.6-flash';
+  const fallbacks = String(process.env.AI_FALLBACK_MODELS || 'gemini-3.6-flash,gemini-flash-latest')
+    .split(',')
+    .map((model) => model.trim())
+    .filter(Boolean);
+  return [...new Set([configured, ...fallbacks].map((model) => model.replace(/^models\//, '')))];
+}
+
 function parseJsonObject(raw) {
   const cleaned = String(raw || '')
     .replace(/^```(?:json)?\s*/i, '')
@@ -42,10 +55,9 @@ function sanitizeAnalysis(analysis) {
 }
 
 async function generateJson(prompt) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error('GEMINI_API_KEY missing');
-  const preferred = (process.env.PRIMARY_GEMINI_MODEL || 'gemini-3.6-flash').replace(/^models\//, '');
-  const models = [...new Set([preferred, 'gemini-3.6-flash', 'gemini-flash-latest'])];
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) throw new Error('AI_API_KEY missing');
+  const models = getGeminiModels();
   const ai = new GoogleGenAI({ apiKey });
   let lastError;
   for (const model of models) {
@@ -163,8 +175,8 @@ ${payload.stack}`;
 }
 
 export async function reviewFixWithGemini({ issue, event, patchedFiles, testFiles = [], repo, base }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) return { ok: true, skipped: true, reason: 'GEMINI_API_KEY missing' };
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) return { ok: true, skipped: true, reason: 'AI_API_KEY missing' };
   const safeFiles = (patchedFiles || [])
     .map((file) => maskContextFile({ ...file, contents: file.githubContents || file.contents }))
     .filter((file) => file && !isSecretPath(file.path));
@@ -197,8 +209,7 @@ ${JSON.stringify(safeFiles.map((file) => ({ path: file.path, contents: file.cont
 Related tests:
 ${JSON.stringify(tests)}`;
 
-  const preferred = (process.env.PRIMARY_GEMINI_MODEL || 'gemini-3.6-flash').replace(/^models\//, '');
-  const models = [...new Set([preferred, 'gemini-3.6-flash', 'gemini-flash-latest'])];
+  const models = getGeminiModels();
   const ai = new GoogleGenAI({ apiKey });
   let lastError;
   for (const model of models) {

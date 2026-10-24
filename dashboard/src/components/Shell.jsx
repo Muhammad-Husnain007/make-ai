@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { NavLink, useLocation, useNavigate } from 'react-router-dom';
-import { AlertTriangle, Bell, Building2, CheckCircle2, Gauge, GitBranch, ListTodo, LogOut, Menu, Settings2, ShieldAlert, Users, X } from 'lucide-react';
+import { AlertTriangle, Bell, Building2, CheckCircle2, Gauge, GitBranch, LogOut, Menu, Settings2, ShieldAlert, Users, X } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth.jsx';
 import { getProjects } from '../lib/api.js';
 import { isErrorsSection, routes } from '../lib/routes.js';
@@ -148,9 +148,6 @@ export function Shell({ children, unread = 0 }) {
               <>
                 <NavLink to={routes.accounts} className={({ isActive }) => linkClass(isActive || location.pathname.startsWith(`${routes.accounts}/`))}>
                   <Building2 size={16} /> Accounts
-                </NavLink>
-                <NavLink to={routes.queues} className={({ isActive }) => linkClass(isActive)}>
-                  <ListTodo size={16} /> Queues
                 </NavLink>
               </>
             ) : (

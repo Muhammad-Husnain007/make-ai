@@ -7,13 +7,12 @@ import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import { Server } from 'socket.io';
-import { listPullStates, presentIssue, shouldRunAgent } from '@pulse/agent';
+import { listPullStates, presentIssue, runFixAgent, shouldRunAgent } from '@pulse/agent';
 import { applyPullStates, createAdminNotification, createProject, deleteIssue, getAgentPipeline, getIssue, getProject, getProjectByKey, ingestEvent, listGithubProjects, listGithubProjectsForScope, listIssues, listProjects, saveAgentPipeline, saveAgentResult, saveClientSettings, serializeProject, setAgentStatus, setIssueStatus, stats, updateProject } from './store.js';
 import { getUserByToken, loginUser, logoutToken, readBearerToken, registerUser, requestRegisterOtp, requestResetOtp, resetPassword, verifyRegisterOtp, verifyResetOtp } from './auth.js';
 import { acceptInvite, adminOverview, canAccessProject, declineInvite, getAdminCompany, getInvite, inviteCompany, inviteMember, isCompanyPaused, isPlatformOwner, listAdminCompanies, listAdminNotifications, listTeam, markAdminNotificationRead, markAllAdminNotificationsRead, removeMember, resendInvite, revokeInvite, roomsForProject, roomsForUser, scopeFromUser, setCompanyPaused } from './org.js';
-import { enqueueScan, getQueueDashboard, isQueueEnabled, queueHealth, registerQueueBoard, startQueue } from './queue.js';
 import { stripPasswordFields } from './safeJson.js';
-import './db.js';
+import { connectDb, disconnectDb } from './db.js';
 
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -30,7 +29,6 @@ await app.register(helmet, { contentSecurityPolicy: false });
 await app.register(rateLimit, {
   max: 180,
   timeWindow: '1 minute',
-  allowList: (req) => String(req.url || '').startsWith('/queues'),
 });
 app.decorateRequest('user', null);
 
@@ -65,26 +63,8 @@ function dashboardOrigin(req) {
   return host ? `${proto}://${host}` : '';
 }
 
-function cookieValue(req, name) {
-  const raw = String(req.headers.cookie || '');
-  for (const part of raw.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('=') || '');
-  }
-  return '';
-}
-
-async function requireQueueAdmin(req, reply) {
-  const token = readBearerToken(req) || cookieValue(req, 'pulse_auth');
-  const user = getUserByToken(token);
-  if (!user || !isPlatformOwner(user.email)) {
-    return reply.code(401).send({ error: 'Sign in required' });
-  }
-  req.user = user;
-}
-
-function projectFilter(user, projectId) {
-  const scope = scopeFromUser(user);
+async function projectFilter(user, projectId) {
+  const scope = await scopeFromUser(user);
   if (scope.all) return { projectId: projectId || undefined, projectIds: undefined };
   const ids = scope.projectIds || [];
   if (projectId) return { projectIds: ids.includes(projectId) ? [projectId] : [] };
@@ -125,11 +105,19 @@ function emitIssueDeleted(project, issueId) {
   }
 }
 
-function queueAgent(issue, event, force = false, project = null) {
-  if (isCompanyPaused(project?.company_id)) return;
-  enqueueScan({ issue, event, force, project }).catch((error) => {
+async function startAgent(issue, event, force = false, project = null) {
+  if (await isCompanyPaused(project?.company_id)) return;
+  setImmediate(() => runFixAgent({
+    issue,
+    event,
+    logger: app.log,
+    io: app.io,
+    force,
+    project,
+    store: agentStore,
+  }).catch((error) => {
     app.log.error({ err: error }, 'Pulse AI agent failed');
-  });
+  }));
 }
 
 let lastPullSync = 0;
@@ -138,14 +126,14 @@ async function syncPullStatuses() {
   lastPullSync = Date.now();
   try {
     const pulls = [];
-    for (const project of listGithubProjects()) {
+    for (const project of await listGithubProjects()) {
       pulls.push(...await listPullStates({
         githubToken: project.github_token,
         githubRepo: project.github_repo,
         githubBaseBranch: project.github_base_branch,
       }));
     }
-    applyPullStates(pulls);
+    await applyPullStates(pulls);
   } catch (error) {
     app.log.warn({ err: error }, 'Unable to refresh pull request statuses');
   }
@@ -157,17 +145,13 @@ app.addHook('preHandler', async (req, reply) => {
   if (path === '/api/auth/login' || path.startsWith('/api/auth/register') || path.startsWith('/api/auth/reset')) return;
   if (req.method === 'GET' && /^\/api\/invites\/[^/]+$/.test(path)) return;
   if (req.method === 'POST' && /^\/api\/invites\/[^/]+\/(accept|decline)$/.test(path)) {
-    req.user = getUserByToken(readBearerToken(req));
+    req.user = await getUserByToken(readBearerToken(req));
     return;
   }
-  const user = getUserByToken(readBearerToken(req));
+  const user = await getUserByToken(readBearerToken(req));
   if (!user) return reply.code(401).send({ error: 'Sign in required' });
   req.user = user;
 });
-
-if (isQueueEnabled()) {
-  registerQueueBoard(app, { authenticate: requireQueueAdmin });
-}
 
 const authLimit = { config: { rateLimit: { max: 20, timeWindow: '1 minute' } } };
 
@@ -181,7 +165,7 @@ app.post('/api/auth/register/otp', authLimit, async (req, reply) => {
 
 app.post('/api/auth/register/otp/verify', authLimit, async (req, reply) => {
   try {
-    return verifyRegisterOtp(req.body || {});
+    return await verifyRegisterOtp(req.body || {});
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -233,19 +217,19 @@ app.post('/api/auth/reset', authLimit, async (req, reply) => {
 app.get('/api/auth/me', async (req) => ({ user: req.user }));
 
 app.post('/api/auth/logout', async (req) => {
-  logoutToken(readBearerToken(req));
+  await logoutToken(readBearerToken(req));
   return { ok: true };
 });
 
 app.get('/api/invites/:token', async (req, reply) => {
-  const invite = getInvite(req.params.token);
+  const invite = await getInvite(req.params.token);
   if (!invite) return reply.code(404).send({ error: 'Invitation not found' });
   return { invite };
 });
 
 app.post('/api/invites/:token/accept', async (req, reply) => {
   try {
-    return { user: acceptInvite(req.params.token, req.user || null) };
+    return { user: await acceptInvite(req.params.token, req.user || null) };
   } catch (error) {
     return reply.code(error.statusCode || 400).send({
       error: error.message,
@@ -256,7 +240,7 @@ app.post('/api/invites/:token/accept', async (req, reply) => {
 
 app.post('/api/invites/:token/decline', async (req, reply) => {
   try {
-    return { invite: declineInvite(req.params.token) };
+    return { invite: await declineInvite(req.params.token) };
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -266,7 +250,7 @@ app.get('/api/team', async (req) => listTeam(req.user));
 
 app.get('/api/admin/notifications', async (req, reply) => {
   try {
-    return listAdminNotifications(req.user, { companyId: req.query?.companyId });
+    return await listAdminNotifications(req.user, { companyId: req.query?.companyId });
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -274,7 +258,7 @@ app.get('/api/admin/notifications', async (req, reply) => {
 
 app.post('/api/admin/notifications/read-all', async (req, reply) => {
   try {
-    return markAllAdminNotificationsRead(req.user);
+    return await markAllAdminNotificationsRead(req.user);
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -282,7 +266,7 @@ app.post('/api/admin/notifications/read-all', async (req, reply) => {
 
 app.patch('/api/admin/notifications/:id', async (req, reply) => {
   try {
-    return markAdminNotificationRead(req.user, req.params.id);
+    return await markAdminNotificationRead(req.user, req.params.id);
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -290,7 +274,7 @@ app.patch('/api/admin/notifications/:id', async (req, reply) => {
 
 app.get('/api/admin/overview', async (req, reply) => {
   try {
-    return adminOverview(req.user);
+    return await adminOverview(req.user);
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -298,7 +282,7 @@ app.get('/api/admin/overview', async (req, reply) => {
 
 app.get('/api/admin/companies', async (req, reply) => {
   try {
-    return { companies: listAdminCompanies(req.user) };
+    return { companies: await listAdminCompanies(req.user) };
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -306,7 +290,7 @@ app.get('/api/admin/companies', async (req, reply) => {
 
 app.get('/api/admin/companies/:id', async (req, reply) => {
   try {
-    return { company: getAdminCompany(req.user, req.params.id) };
+    return { company: await getAdminCompany(req.user, req.params.id) };
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -314,7 +298,7 @@ app.get('/api/admin/companies/:id', async (req, reply) => {
 
 app.patch('/api/admin/companies/:id', async (req, reply) => {
   try {
-    return { company: setCompanyPaused(req.user, req.params.id, req.body?.paused) };
+    return { company: await setCompanyPaused(req.user, req.params.id, req.body?.paused) };
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -361,7 +345,7 @@ app.post('/api/team/invites/:id/resend', authLimit, async (req, reply) => {
 
 app.delete('/api/team/members/:id', async (req, reply) => {
   try {
-    const result = removeMember({ actor: req.user, userId: req.params.id });
+    const result = await removeMember({ actor: req.user, userId: req.params.id });
     await forceLogoutSockets(result.userId);
     return result;
   } catch (error) {
@@ -371,7 +355,7 @@ app.delete('/api/team/members/:id', async (req, reply) => {
 
 app.delete('/api/team/invites/:id', async (req, reply) => {
   try {
-    return revokeInvite({ actor: req.user, inviteId: req.params.id });
+    return await revokeInvite({ actor: req.user, inviteId: req.params.id });
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -381,24 +365,18 @@ app.get('/health', async () => ({
   ok: true,
   service: 'pulse-api',
   agent: {
-    gemini: Boolean(process.env.GEMINI_API_KEY),
+    gemini: Boolean(process.env.AI_API_KEY),
     smtp: Boolean(process.env.SMTP_USER || process.env.GMAIL_USER),
   },
-  queue: queueHealth(),
 }));
 
-app.get('/api/queues', async (req, reply) => {
-  if (!isPlatformOwner(req.user?.email)) return reply.code(403).send({ error: 'Only the Pulse owner can view jobs.' });
-  return getQueueDashboard();
-});
-
-app.get('/api/projects', async (req) => ({ projects: listProjects(scopeFromUser(req.user)) }));
+app.get('/api/projects', async (req) => ({ projects: await listProjects(await scopeFromUser(req.user)) }));
 
 app.post('/api/projects', async (req, reply) => {
   const name = typeof req.body?.name === 'string' ? req.body.name : 'New project';
   const notifyEmail = typeof req.body?.notifyEmail === 'string' ? req.body.notifyEmail : req.body?.notify_email;
   try {
-    return reply.code(201).send({ project: createProject(name, notifyEmail) });
+    return reply.code(201).send({ project: await createProject(name, notifyEmail) });
   } catch (error) {
     return reply.code(error.statusCode || 400).send({ error: error.message });
   }
@@ -406,7 +384,7 @@ app.post('/api/projects', async (req, reply) => {
 
 app.patch('/api/projects/:id', async (req, reply) => {
   try {
-    const project = updateProject(req.params.id, {
+    const project = await updateProject(req.params.id, {
       name: req.body?.name,
       notifyEmail: req.body?.notifyEmail ?? req.body?.notify_email,
     });
@@ -420,13 +398,13 @@ app.patch('/api/projects/:id', async (req, reply) => {
 app.get('/api/issues', async (req) => {
   syncPullStatuses().catch(() => {});
   const { projectId, status, environment, q, limit } = req.query || {};
-  const issues = listIssues({ ...projectFilter(req.user, projectId), status, environment, q, limit });
+  const issues = await listIssues({ ...await projectFilter(req.user, projectId), status, environment, q, limit });
   return { issues: issues.map((issue) => presentForUser(req.user, issue)) };
 });
 
 app.get('/api/pipelines', async (req) => {
   if (req.user?.platformOwner) return { pipelines: [], configuredRepos: 0 };
-  const projects = listGithubProjectsForScope(scopeFromUser(req.user));
+  const projects = await listGithubProjectsForScope(await scopeFromUser(req.user));
   const results = await Promise.all(projects.map(async (project) => {
     const [owner, repo] = String(project.github_repo || '').split('/');
     if (!owner || !repo) return { pipelines: [], unavailableRepo: project.github_repo || project.name };
@@ -475,34 +453,34 @@ app.get('/api/pipelines', async (req) => {
 });
 
 app.get('/api/issues/:id', async (req, reply) => {
-  const issue = getIssue(req.params.id);
-  if (!issue || !canAccessProject(req.user, issue.project_id)) return reply.code(404).send({ error: 'Issue not found' });
+  const issue = await getIssue(req.params.id);
+  if (!issue || !await canAccessProject(req.user, issue.project_id)) return reply.code(404).send({ error: 'Issue not found' });
   return { issue: presentForUser(req.user, issue) };
 });
 
 app.patch('/api/issues/:id', async (req, reply) => {
-  const current = getIssue(req.params.id);
-  if (!current || !canAccessProject(req.user, current.project_id)) return reply.code(404).send({ error: 'Issue not found' });
-  const issue = setIssueStatus(req.params.id, req.body?.status);
+  const current = await getIssue(req.params.id);
+  if (!current || !await canAccessProject(req.user, current.project_id)) return reply.code(404).send({ error: 'Issue not found' });
+  const issue = await setIssueStatus(req.params.id, req.body?.status);
   if (!issue) return reply.code(400).send({ error: 'Unable to update issue' });
-  emitIssueRooms(getProject(issue.project_id), issue);
+  emitIssueRooms(await getProject(issue.project_id), issue);
   return { issue: presentForUser(req.user, issue) };
 });
 
 app.delete('/api/issues/:id', async (req, reply) => {
-  const current = getIssue(req.params.id);
-  if (!current || !canAccessProject(req.user, current.project_id)) return reply.code(404).send({ error: 'Issue not found' });
-  const removed = deleteIssue(req.params.id);
+  const current = await getIssue(req.params.id);
+  if (!current || !await canAccessProject(req.user, current.project_id)) return reply.code(404).send({ error: 'Issue not found' });
+  const removed = await deleteIssue(req.params.id);
   if (!removed) return reply.code(404).send({ error: 'Issue not found' });
-  emitIssueDeleted(getProject(removed.project_id), removed.id);
+  emitIssueDeleted(await getProject(removed.project_id), removed.id);
   return { ok: true, id: removed.id };
 });
 
 app.post('/api/issues/:id/agent', async (req, reply) => {
-  const issue = getIssue(req.params.id);
-  if (!issue || !canAccessProject(req.user, issue.project_id)) return reply.code(404).send({ error: 'Issue not found' });
-  const project = getProject(issue.project_id);
-  if (isCompanyPaused(project?.company_id)) return reply.code(403).send({ error: 'This company is paused.' });
+  const issue = await getIssue(req.params.id);
+  if (!issue || !await canAccessProject(req.user, issue.project_id)) return reply.code(404).send({ error: 'Issue not found' });
+  const project = await getProject(issue.project_id);
+  if (await isCompanyPaused(project?.company_id)) return reply.code(403).send({ error: 'This company is paused.' });
   const event = issue.events?.[0] || {
     stack: '',
     url: '',
@@ -510,19 +488,19 @@ app.post('/api/issues/:id/agent', async (req, reply) => {
     level: issue.level,
     message: issue.title,
   };
-  queueAgent(issue, event, true, getProject(issue.project_id));
-  return { ok: true, queued: true, issue: presentForUser(req.user, { ...issue, agent_status: 'running' }) };
+  startAgent(issue, event, true, project).catch((error) => app.log.error({ err: error }, 'Pulse AI agent failed to start'));
+  return { ok: true, started: true, issue: presentForUser(req.user, { ...issue, agent_status: 'running' }) };
 });
 
 app.get('/api/stats', async (req) => {
   syncPullStatuses().catch(() => {});
-  const filter = projectFilter(req.user, req.query?.projectId);
-  return { stats: stats(filter.projectId, filter.projectIds) };
+  const filter = await projectFilter(req.user, req.query?.projectId);
+  return { stats: await stats(filter.projectId, filter.projectIds) };
 });
 
 app.put('/ingest/:projectKey/settings', async (req, reply) => {
   try {
-    const project = saveClientSettings(req.params.projectKey, {
+    const project = await saveClientSettings(req.params.projectKey, {
       name: req.body?.name,
       githubToken: req.body?.githubToken ?? req.body?.github_token,
       githubRepo: req.body?.githubRepo ?? req.body?.github_repo,
@@ -542,25 +520,25 @@ app.post('/ingest/:projectKey', {
   config: { rateLimit: { max: 300, timeWindow: '1 minute' } },
 }, async (req, reply) => {
   try {
-    const project = getProjectByKey(req.params.projectKey);
+    const project = await getProjectByKey(req.params.projectKey);
     if (!project) return reply.code(401).send({ ok: false, error: 'Unknown project key' });
-    if (isCompanyPaused(project.company_id)) {
+    if (await isCompanyPaused(project.company_id)) {
       return reply.code(403).send({ ok: false, error: 'This company is paused.' });
     }
-    const result = ingestEvent(req.params.projectKey, req.body);
+    const result = await ingestEvent(req.params.projectKey, req.body);
     emitToProject(result.project, 'pulse:event', {
       issue: result.issue,
       event: result.event,
       projectId: result.project.id,
     });
     if (shouldRunAgent(result)) {
-      queueAgent(result.issue, result.event, Boolean(result.reopened), result.project);
+      startAgent(result.issue, result.event, Boolean(result.reopened), result.project).catch((error) => app.log.error({ err: error }, 'Pulse AI agent failed to start'));
     }
     return reply.code(202).send({
       ok: true,
       id: result.event.id,
       issueId: result.issue.id,
-      agentQueued: shouldRunAgent(result),
+      agentStarted: shouldRunAgent(result),
     });
   } catch (error) {
     const status = error.statusCode || 500;
@@ -590,7 +568,6 @@ app.setNotFoundHandler((req, reply) => {
     urlPath.startsWith('/api')
     || urlPath.startsWith('/ingest')
     || urlPath.startsWith('/health')
-    || urlPath.startsWith('/queues')
     || urlPath.startsWith('/realtime')
   ) {
     return reply.code(404).send({ error: 'Not found' });
@@ -610,21 +587,21 @@ app.setNotFoundHandler((req, reply) => {
 });
 
 const start = async () => {
+  await connectDb();
   await app.ready();
   const io = new Server(app.server, {
     cors: { origin: true },
     path: '/realtime',
   });
   app.decorate('io', io);
-  io.on('connection', (socket) => {
-    const user = getUserByToken(socket.handshake.auth?.token || '');
+  io.on('connection', async (socket) => {
+    const user = await getUserByToken(socket.handshake.auth?.token || '');
     if (user) {
       socket.join(`user:${user.id}`);
-      for (const room of roomsForUser(user)) socket.join(room);
+      for (const room of await roomsForUser(user)) socket.join(room);
     }
     socket.emit('pulse:hello', { ok: true, ts: Date.now() });
   });
-  await startQueue({ logger: app.log, io, store: agentStore });
   for (let attempt = 0; attempt < 8; attempt += 1) {
     try {
       await app.listen({ port: PORT, host: HOST });
@@ -640,5 +617,6 @@ const start = async () => {
 
 start().catch((error) => {
   app.log.error(error);
+  disconnectDb().catch(() => {});
   process.exit(1);
 });

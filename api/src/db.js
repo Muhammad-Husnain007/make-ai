@@ -1,184 +1,61 @@
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import Database from 'better-sqlite3';
+import mongoose from 'mongoose';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.join(__dirname, '..', 'data');
-const dbPath = path.join(dataDir, 'pulse.db');
+const { Schema } = mongoose;
+const schema = (fields, indexes = []) => {
+  const value = new Schema(fields, { versionKey: false, strict: false });
+  for (const [keys, options] of indexes) value.index(keys, options);
+  return value;
+};
 
-fs.mkdirSync(dataDir, { recursive: true });
+const model = (name, fields, indexes) => mongoose.models[name] || mongoose.model(name, schema(fields, indexes));
+const id = { type: String, required: true, unique: true, index: true };
 
-export const db = new Database(dbPath);
-db.pragma('journal_mode = WAL');
-db.pragma('foreign_keys = ON');
+export const Project = model('PulseProject', {
+  id, name: String, public_key: { type: String, unique: true, index: true }, created_at: String,
+  notify_email: { type: String, default: '' }, github_token: String, github_repo: String,
+  github_base_branch: String, send_email_enabled: { type: Boolean, default: false }, company_id: { type: String, default: null },
+});
+export const Issue = model('PulseIssue', {
+  id, project_id: { type: String, index: true }, fingerprint: String, title: String, culprit: String,
+  type: String, level: { type: String, default: 'error' }, status: { type: String, default: 'open' },
+  count: { type: Number, default: 1 }, user_count: { type: Number, default: 0 }, first_seen: String, last_seen: String,
+  agent_status: { type: String, default: 'idle' }, agent_summary: String, agent_solution: String,
+  pr_url: String, pr_merged: { type: Boolean, default: false }, pr_closed: { type: Boolean, default: false },
+  emailed_at: String, emailed_to: String, agent_pipeline: Schema.Types.Mixed, agent_error: String,
+}, [[{ project_id: 1, fingerprint: 1 }, { unique: true }], [{ project_id: 1, last_seen: -1 }, {}], [{ status: 1 }, {}]]);
+export const Event = model('PulseEvent', {
+  id, issue_id: { type: String, index: true }, project_id: { type: String, index: true }, timestamp: { type: String, index: true },
+  level: String, message: String, type: String, stack: String, url: String, environment: String, release_name: String,
+  user: { type: Schema.Types.Mixed, default: {} }, tags: { type: Schema.Types.Mixed, default: {} },
+  breadcrumbs: { type: [Schema.Types.Mixed], default: [] }, extra: { type: Schema.Types.Mixed, default: {} }, sdk: String,
+}, [[{ issue_id: 1, timestamp: -1 }, {}], [{ project_id: 1, timestamp: -1 }, {}]]);
+export const User = model('PulseUser', { id, name: String, email: { type: String, unique: true, index: true }, password_hash: String, created_at: String });
+export const Session = model('PulseSession', { token: { type: String, unique: true, index: true }, user_id: { type: String, index: true }, expires_at: String, created_at: String });
+export const Company = model('PulseCompany', { id, name: String, created_at: String, address: { type: String, default: '' }, paused: { type: Boolean, default: false } });
+export const CompanyMember = model('PulseCompanyMember', {
+  company_id: { type: String, index: true }, user_id: { type: String, index: true }, role: String,
+  created_at: String, can_invite: { type: Boolean, default: false },
+}, [[{ company_id: 1, user_id: 1 }, { unique: true }]]);
+export const Invitation = model('PulseInvitation', {
+  id, token: { type: String, unique: true, index: true }, kind: String, email: { type: String, index: true },
+  company_name: String, company_id: { type: String, default: null, index: true }, invited_by: String,
+  status: { type: String, default: 'pending', index: true }, expires_at: String, created_at: String,
+  can_invite: { type: Boolean, default: false }, company_address: { type: String, default: '' },
+});
+export const RegisterOtp = model('PulseRegisterOtp', { email: { type: String, unique: true }, name: String, otp_hash: String, verified: Boolean, expires_at: String, created_at: String });
+export const ResetOtp = model('PulseResetOtp', { email: { type: String, unique: true }, otp_hash: String, verified: Boolean, expires_at: String, created_at: String });
+export const AdminNotification = model('PulseAdminNotification', {
+  id, company_id: String, company_name: { type: String, default: '' }, project_id: String, issue_id: String,
+  title: String, message: String, read_at: { type: String, default: null }, created_at: String,
+}, [[{ issue_id: 1, read_at: 1, created_at: -1 }, {}], [{ company_id: 1, created_at: -1 }, {}]]);
 
-db.exec(`
-  CREATE TABLE IF NOT EXISTS projects (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    public_key TEXT NOT NULL UNIQUE,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS issues (
-    id TEXT PRIMARY KEY,
-    project_id TEXT NOT NULL,
-    fingerprint TEXT NOT NULL,
-    title TEXT NOT NULL,
-    culprit TEXT,
-    type TEXT,
-    level TEXT NOT NULL DEFAULT 'error',
-    status TEXT NOT NULL DEFAULT 'open',
-    count INTEGER NOT NULL DEFAULT 1,
-    user_count INTEGER NOT NULL DEFAULT 0,
-    first_seen TEXT NOT NULL,
-    last_seen TEXT NOT NULL,
-    UNIQUE (project_id, fingerprint),
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS events (
-    id TEXT PRIMARY KEY,
-    issue_id TEXT NOT NULL,
-    project_id TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    level TEXT,
-    message TEXT,
-    type TEXT,
-    stack TEXT,
-    url TEXT,
-    environment TEXT,
-    release_name TEXT,
-    user_json TEXT,
-    tags_json TEXT,
-    breadcrumbs_json TEXT,
-    extra_json TEXT,
-    sdk TEXT,
-    FOREIGN KEY (issue_id) REFERENCES issues(id) ON DELETE CASCADE,
-    FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_issues_project_last ON issues(project_id, last_seen DESC);
-  CREATE INDEX IF NOT EXISTS idx_issues_status ON issues(status);
-  CREATE INDEX IF NOT EXISTS idx_events_issue_time ON events(issue_id, timestamp DESC);
-  CREATE INDEX IF NOT EXISTS idx_events_project_time ON events(project_id, timestamp DESC);
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS sessions (
-    token TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
-
-  CREATE TABLE IF NOT EXISTS companies (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS company_members (
-    company_id TEXT NOT NULL,
-    user_id TEXT NOT NULL,
-    role TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    PRIMARY KEY (company_id, user_id),
-    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE TABLE IF NOT EXISTS invitations (
-    id TEXT PRIMARY KEY,
-    token TEXT NOT NULL UNIQUE,
-    kind TEXT NOT NULL,
-    email TEXT NOT NULL,
-    company_name TEXT,
-    company_id TEXT,
-    invited_by TEXT NOT NULL,
-    status TEXT NOT NULL DEFAULT 'pending',
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL,
-    FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE,
-    FOREIGN KEY (invited_by) REFERENCES users(id) ON DELETE CASCADE
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_invites_email ON invitations(email, status);
-  CREATE INDEX IF NOT EXISTS idx_members_user ON company_members(user_id);
-
-  CREATE TABLE IF NOT EXISTS register_otps (
-    email TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    otp_hash TEXT NOT NULL,
-    verified INTEGER NOT NULL DEFAULT 0,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-
-  CREATE TABLE IF NOT EXISTS reset_otps (
-    email TEXT PRIMARY KEY,
-    otp_hash TEXT NOT NULL,
-    verified INTEGER NOT NULL DEFAULT 0,
-    expires_at TEXT NOT NULL,
-    created_at TEXT NOT NULL
-  );
-`);
-
-function ensureColumn(table, name, definition) {
-  const cols = db.prepare(`PRAGMA table_info(${table})`).all();
-  if (!cols.some((col) => col.name === name)) {
-    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition}`);
-  }
+export async function connectDb() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) throw new Error('MONGODB_URI is required to start the Pulse API.');
+  await mongoose.connect(uri, { dbName: process.env.MONGODB_DB_NAME || 'pulse' });
+  await Promise.all(Object.values(mongoose.models).map((registeredModel) => registeredModel.init()));
 }
 
-ensureColumn('issues', 'agent_status', "TEXT NOT NULL DEFAULT 'idle'");
-ensureColumn('issues', 'agent_summary', 'TEXT');
-ensureColumn('issues', 'agent_solution', 'TEXT');
-ensureColumn('issues', 'pr_url', 'TEXT');
-ensureColumn('issues', 'pr_merged', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('issues', 'pr_closed', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('issues', 'emailed_at', 'TEXT');
-ensureColumn('issues', 'emailed_to', 'TEXT');
-ensureColumn('issues', 'agent_pipeline', 'TEXT');
-ensureColumn('issues', 'agent_error', 'TEXT');
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS admin_notifications (
-    id TEXT PRIMARY KEY,
-    company_id TEXT,
-    company_name TEXT NOT NULL DEFAULT '',
-    project_id TEXT,
-    issue_id TEXT,
-    title TEXT NOT NULL,
-    message TEXT NOT NULL,
-    read_at TEXT,
-    created_at TEXT NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_admin_notifications_unread ON admin_notifications(read_at, created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_admin_notifications_company ON admin_notifications(company_id, created_at DESC);
-`);
-ensureColumn('projects', 'notify_email', "TEXT NOT NULL DEFAULT ''");
-ensureColumn('projects', 'github_token', 'TEXT');
-ensureColumn('projects', 'github_repo', 'TEXT');
-ensureColumn('projects', 'github_base_branch', 'TEXT');
-ensureColumn('projects', 'send_email_enabled', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('projects', 'company_id', 'TEXT');
-ensureColumn('invitations', 'can_invite', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('invitations', 'company_address', "TEXT NOT NULL DEFAULT ''");
-ensureColumn('company_members', 'can_invite', 'INTEGER NOT NULL DEFAULT 0');
-ensureColumn('companies', 'address', "TEXT NOT NULL DEFAULT ''");
-ensureColumn('companies', 'paused', 'INTEGER NOT NULL DEFAULT 0');
-
-if (process.argv.includes('--init')) {
-  console.log(`Pulse DB ready at ${dbPath}`);
+export async function disconnectDb() {
+  await mongoose.disconnect();
 }

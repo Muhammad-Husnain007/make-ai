@@ -59,6 +59,7 @@ export function createPulseClient(options = {}) {
     queue: [],
     sending: false,
     installed: false,
+    fatalHandling: false,
   };
 
   function addBreadcrumb(crumb) {
@@ -91,6 +92,9 @@ export function createPulseClient(options = {}) {
           headers: { 'Content-Type': 'application/json' },
           body: payload,
           keepalive: true,
+          signal: typeof globalThis.AbortSignal?.timeout === 'function'
+            ? globalThis.AbortSignal.timeout(2500)
+            : undefined,
         });
         if (!response.ok) throw new Error(`Pulse ingest failed (${response.status})`);
       }
@@ -164,20 +168,33 @@ export function createPulseClient(options = {}) {
 
   function installNode() {
     if (typeof process === 'undefined' || typeof process.on !== 'function') return;
-    process.on('uncaughtException', (error) => {
+    function failFast(error, context) {
+      if (state.fatalHandling) return;
+      state.fatalHandling = true;
       captureException(error, {
         level: 'fatal',
-        url: typeof process !== 'undefined' ? String(process.argv?.[1] || '') : '',
-        extra: {
-          kind: 'uncaughtException',
-          cwd: typeof process !== 'undefined' ? process.cwd() : '',
-          main: typeof process !== 'undefined' ? String(process.argv?.[1] || '') : '',
-        },
+        url: String(process.argv?.[1] || ''),
+        extra: { ...context, cwd: process.cwd(), main: String(process.argv?.[1] || '') },
       });
+      const forceExit = setTimeout(() => process.exit(1), 3000);
+      const drain = async () => {
+        const deadline = Date.now() + 2700;
+        while (state.sending && Date.now() < deadline) {
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+        if (state.queue.length) await flush();
+      };
+      drain().finally(() => {
+        clearTimeout(forceExit);
+        process.exit(1);
+      });
+    }
+    process.on('uncaughtException', (error) => {
+      failFast(error, { kind: 'uncaughtException' });
     });
     process.on('unhandledRejection', (reason) => {
       const error = reason instanceof Error ? reason : new Error(String(reason));
-      captureException(error, { level: 'error', extra: { kind: 'unhandledRejection' } });
+      failFast(error, { kind: 'unhandledRejection' });
     });
     process.on('beforeExit', () => { flush(); });
   }

@@ -57,6 +57,16 @@ ISENABLEDSENDEMAIL=true
 
       <pre className="mb-8 overflow-auto rounded-2xl border border-white/8 bg-ink-900 p-4 font-mono text-[12px] leading-relaxed text-zinc-300 sm:p-5">{snippet}</pre>
 
+      <div className="mb-8 max-w-3xl rounded-2xl border border-white/8 bg-ink-900 p-5 text-sm text-zinc-300">
+        <h2 className="mb-2 font-semibold text-white">GitHub token permissions</h2>
+        <p className="mb-2 text-zinc-400">For a fine-grained personal access token, select the exact client repository and grant:</p>
+        <ul className="mb-3 list-inside list-disc space-y-1">
+          <li>Contents: Read and write</li>
+          <li>Pull requests: Read and write</li>
+        </ul>
+        <p className="text-zinc-400">For organization repositories, the organization may also need to approve the token or authorize it for SSO. Save the updated token in the Pulse project's GitHub settings, then retry the issue.</p>
+      </div>
+
       <ClientInfo />
     </div>
   );

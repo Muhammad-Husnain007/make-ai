@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { adviseSecretIssue, analyzeWithGemini, isRetryableAi, reviewFixWithGemini } from './gemini.js';
-import { createFixPullRequest, gatherGithubContext, loadRelatedTestFiles } from './github.js';
+import { commitFixBranch, gatherGithubContext, loadRelatedTestFiles, openFixPullRequest, runGithubWorkflow } from './github.js';
 import { emailFixReport, resolveNotifyEmail } from './mailer.js';
 import { applyAiFilePatch, fallbackIssueFix, githubAlreadyHasFix } from './source.js';
 import { presentIssue } from './clientView.js';
@@ -25,6 +25,11 @@ function fixedIssueName(title) {
     .replace(/^-+|-+$/g, '')
     .slice(0, 60) || 'issue';
   return `fixed/${slug}`;
+}
+
+function fixedIssueBranch(title, issueId) {
+  const id = String(issueId || 'issue').replace(/[^a-zA-Z0-9-]/g, '').slice(-16) || 'issue';
+  return `${fixedIssueName(title)}-${id}`;
 }
 
 function selectPatchedFiles(aiFiles, contextFiles) {
@@ -131,7 +136,7 @@ export function canContinueToPr(test) {
   return Boolean(test?.ok && test.files?.length);
 }
 
-async function runFixTests({ issue, event, files, analysis, github, githubConfig }) {
+async function runFixTests({ issue, event, files, analysis, github, githubConfig, attempt }) {
   const checks = [];
   const syntaxFailures = syntaxCheckFiles(files);
   if (syntaxFailures.length) {
@@ -177,7 +182,39 @@ async function runFixTests({ issue, event, files, analysis, github, githubConfig
     };
   }
   checks.push(review.skipped ? 'AI review skipped' : 'AI review');
-  return { ok: true, reason: review.reason || '', checks };
+  const candidateBranch = `${fixedIssueBranch(issue.title, issue.id)}-try${attempt + 1}-${globalThis.crypto.randomUUID().slice(0, 8)}`;
+  const committed = await commitFixBranch({
+    branch: candidateBranch,
+    title: `test candidate: ${issue.title || 'production error'}`,
+    files,
+    github: githubConfig || github,
+  });
+  if (!committed.ok) return { ok: false, retryable: false, reason: committed.reason, checks };
+  checks.push('GitHub candidate branch');
+
+  const validation = await runGithubWorkflow({
+    branch: candidateBranch,
+    sha: committed.sha,
+    github: githubConfig || github,
+  });
+  if (!validation.ok) {
+    return {
+      ok: false,
+      reason: validation.reason || 'GitHub Actions validation failed; no PR was opened.',
+      checks,
+      candidateBranch,
+      workflowUrl: validation.url || '',
+      retryable: validation.retryable === true,
+    };
+  }
+  checks.push(`GitHub Actions passed${validation.url ? ` (${validation.url})` : ''}`);
+  return {
+    ok: true,
+    reason: review.reason || '',
+    checks,
+    candidateBranch,
+    workflowUrl: validation.url || '',
+  };
 }
 
 export async function testFix({ issue, event, files, analysis, github, githubConfig, agentError, logger }) {
@@ -193,6 +230,7 @@ export async function testFix({ issue, event, files, analysis, github, githubCon
       analysis: currentAnalysis,
       github,
       githubConfig,
+      attempt,
     });
     if (lastReport.ok) {
       const summary = formatTestSummary(lastReport);
@@ -206,9 +244,11 @@ export async function testFix({ issue, event, files, analysis, github, githubCon
         },
         agentError,
         tests: lastReport,
+        candidateBranch: lastReport.candidateBranch,
+        workflowUrl: lastReport.workflowUrl,
       };
     }
-    if (attempt === 1 || !github?.ok || !github.files?.length) break;
+    if (attempt === 1 || lastReport.retryable === false || !github?.ok || !github.files?.length) break;
     logger?.warn?.({ reason: lastReport.reason }, 'Pulse fix failed tests; retrying analysis');
     try {
       const retryIssue = {
@@ -260,6 +300,8 @@ export async function testFix({ issue, event, files, analysis, github, githubCon
     },
     agentError: reason,
     tests: lastReport,
+    candidateBranch: lastReport?.candidateBranch || '',
+    workflowUrl: lastReport?.workflowUrl || '',
   };
 }
 
@@ -278,8 +320,8 @@ export async function loadGithubContext({ issue, event, project }) {
 
 export async function scanIssue({ issue, event, project, logger, store }) {
   const persistence = requireStore(store);
-  const current = persistence.getIssue(issue.id) || issue;
-  const owner = project || persistence.getProject?.(current.project_id);
+  const current = await persistence.getIssue(issue.id) || issue;
+  const owner = project || await persistence.getProject?.(current.project_id);
   let analysis = defaultAnalysis(issue);
   let agentError = '';
   let github = { ok: false, files: [], secretFiles: [], reason: '', unmatchedReason: '', repoFull: '', base: '' };
@@ -374,16 +416,18 @@ export async function fixIssue({ issue, analysis, github, agentError }) {
   return { files, analysis: nextAnalysis, agentError: nextError };
 }
 
-export async function makeFixPr({ issue, event, github, githubConfig, files, analysis, agentError }) {
+export async function makeFixPr({ issue, event, github, githubConfig, files, analysis, agentError, candidateBranch, workflowUrl }) {
   let prUrl = '';
   let nextAnalysis = { ...analysis };
   let nextError = agentError;
   if (files?.length) {
     const prName = fixedIssueName(issue.title);
-    const pr = await createFixPullRequest({
+    const branch = candidateBranch;
+    if (!branch) return { prUrl, analysis: nextAnalysis, agentError: 'Tested candidate branch is missing; no PR was opened.' };
+    const pr = await openFixPullRequest({
       github: githubConfig,
       target: github?.ok && github?.octokit ? github : null,
-      branch: prName,
+      branch,
       title: prName,
       body: [
         analysis.prBody || analysis.summary || analysis.rootCause,
@@ -393,6 +437,7 @@ export async function makeFixPr({ issue, event, github, githubConfig, files, ana
         `Tracked issue: ${issue.id}`,
         `Base branch: ${github?.base || ''}`,
         `Repo: ${github?.repoFull || ''}`,
+        workflowUrl ? `GitHub Actions test run: ${workflowUrl}` : '',
         event.url ? `Error URL: ${event.url}` : '',
         analysis.prBody && /Tests passed/.test(analysis.prBody) ? '' : 'Tests passed before this pull request was opened.',
         '',
@@ -413,8 +458,8 @@ export async function makeFixPr({ issue, event, github, githubConfig, files, ana
 
 export async function finalizeAgent({ issue, event, analysis, prUrl, agentError, project, store, io, logger, secretAlert = false }) {
   const persistence = requireStore(store);
-  const current = persistence.getIssue(issue.id) || issue;
-  const owner = project || persistence.getProject?.(current.project_id);
+  const current = await persistence.getIssue(issue.id) || issue;
+  const owner = project || await persistence.getProject?.(current.project_id);
   const mailTo = resolveNotifyEmail(owner, current);
   let emailedAt = null;
   let emailedTo = '';
@@ -443,7 +488,7 @@ export async function finalizeAgent({ issue, event, analysis, prUrl, agentError,
     }
   }
 
-  const saved = persistence.saveAgentResult(issue.id, {
+  const saved = await persistence.saveAgentResult(issue.id, {
     status: failed ? 'failed' : 'done',
     summary: analysis.summary || analysis.rootCause || '',
     solution: [analysis.rootCause, analysis.solution].filter(Boolean).join('\n\n'),
@@ -456,7 +501,7 @@ export async function finalizeAgent({ issue, event, analysis, prUrl, agentError,
   try {
     const secretTitle = secretGuidance.map((item) => item.path).filter(Boolean).join(', ') || 'secret files';
     const note = secretAlert || secretGuidance.length
-      ? persistence.createAdminNotification?.({
+      ? await persistence.createAdminNotification?.({
         companyId: owner?.company_id,
         projectId: owner?.id || current.project_id,
         issueId: issue.id,
@@ -471,7 +516,7 @@ export async function finalizeAgent({ issue, event, analysis, prUrl, agentError,
         ].filter(Boolean).join('\n\n'),
       })
       : nextError
-        ? persistence.createAdminNotification?.({
+        ? await persistence.createAdminNotification?.({
           companyId: owner?.company_id,
           projectId: owner?.id || current.project_id,
           issueId: issue.id,
@@ -491,12 +536,12 @@ export async function finalizeAgent({ issue, event, analysis, prUrl, agentError,
 export async function runFixAgent({ issue, event, logger, io, force = false, project = null, store }) {
   const persistence = requireStore(store);
   if (!['error', 'fatal'].includes(issue.level || event.level || 'error')) return null;
-  const current = persistence.getIssue(issue.id) || issue;
-  const owner = project || persistence.getProject?.(current.project_id);
+  const current = await persistence.getIssue(issue.id) || issue;
+  const owner = project || await persistence.getProject?.(current.project_id);
   if (!force && current.agent_status === 'running') return current;
   if (!force && current.agent_status === 'done' && current.pr_url) return current;
 
-  persistence.setAgentStatus(issue.id, 'running');
+  await persistence.setAgentStatus(issue.id, 'running');
   emitIssue(io, { ...current, agent_status: 'running' }, owner);
 
   const scan = await scanIssue({ issue: current, event, project: owner, logger, store: persistence });
@@ -564,6 +609,8 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
     files: tested.files,
     analysis: tested.analysis,
     agentError: tested.agentError,
+    candidateBranch: tested.candidateBranch,
+    workflowUrl: tested.workflowUrl,
   });
   return finalizeAgent({
     issue: current,

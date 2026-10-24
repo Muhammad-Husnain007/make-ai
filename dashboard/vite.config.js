@@ -2,6 +2,11 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
 const pulseApi = process.env.PULSE_API_ORIGIN || 'http://127.0.0.1:8787';
+const realtimeProxy = {
+  target: pulseApi,
+  changeOrigin: true,
+  ws: true,
+};
 
 export default defineConfig({
   plugins: [react()],
@@ -10,8 +15,7 @@ export default defineConfig({
       '/api': pulseApi,
       '/ingest': pulseApi,
       '/health': pulseApi,
-      '/queues': pulseApi,
-      '/realtime': { target: pulseApi, ws: true },
+      '/realtime': realtimeProxy,
     },
   },
   preview: {
@@ -19,8 +23,7 @@ export default defineConfig({
       '/api': pulseApi,
       '/ingest': pulseApi,
       '/health': pulseApi,
-      '/queues': pulseApi,
-      '/realtime': { target: pulseApi, ws: true },
+      '/realtime': realtimeProxy,
     },
   },
 });

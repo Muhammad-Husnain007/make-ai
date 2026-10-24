@@ -6,14 +6,14 @@ Pulse traces client crashes, groups them, opens a GitHub PR on the **client repo
 
 ## Stack
 
-- API: Fastify, Socket.IO, Zod, better-sqlite3
+- API: Fastify, Socket.IO, Zod, Mongoose, MongoDB
 - Agent: Gemini, Octokit PRs, Nodemailer (`@pulse/agent`)
 - SDK: browser + Node (`window.onerror`, unhandled rejections, breadcrumbs)
 - Dashboard: React, Vite, Tailwind, Recharts
 
 ## Run Pulse
 
-Use Node.js 22 LTS. The API uses `better-sqlite3`, which has native binaries for Node 22; newer Node releases may require local Python and C++ build tools.
+Use Node.js 22 LTS. The API stores Pulse data in MongoDB. Set `MONGODB_URI` and optionally `MONGODB_DB_NAME` (defaults to `pulse`) in the Pulse API environment.
 
 ```bash
 npm install
@@ -21,9 +21,9 @@ npm run setup
 npm run dev
 ```
 
-Put production keys in `.env` (`NODE_ENV`, `HOST`, `PORT`, `DASHBOARD_URL`, `GEMINI_API_KEY`, `SMTP_USER`, `SMTP_PASS`, `ISQUEUEENABLE`, `REDIS_URL`). Create a project in the dashboard and copy that project's DSN into the client app.
+Configure `.env` with `NODE_ENV`, `HOST`, `PORT`, `DASHBOARD_URL`, `MONGODB_URI`, `AI_API_KEY`, `SMTP_USER`, and `SMTP_PASS`. Create a project in the dashboard and copy that project's DSN into the client app. Agent processing and invitation emails are handled inline by the API.
 
-Set `ISQUEUEENABLE=true` to run scan, fix, PR, and invitation emails as BullMQ jobs (`REDIS_URL` required). The Jobs page and `/queues/ui` dashboard show those queues. `false` keeps inline job handling.
+To preserve data from an existing Pulse SQLite database, run `npm run db:migrate -w api` once before starting the API. The migration is idempotent and leaves the SQLite file untouched.
 
 Pulse sends mail with those SMTP credentials. Whether a client wants PR emails is `ISENABLEDSENDEMAIL` in **that client app**, not in Pulse.
 
@@ -56,11 +56,15 @@ ISENABLEDSENDEMAIL=true
 
 On startup the SDK tells Pulse the repo, base branch, PR email, and whether to send that email. No route changes in the client.
 
+For a fine-grained GitHub personal access token, select the exact client repository and grant **Contents: Read and write** and **Pull requests: Read and write**. Organization repositories may also require an administrator to approve the token or authorize it for SSO. Store this token in the Pulse project's GitHub settings, not in the Pulse server `.env`.
+
+Before opening a PR, Pulse checks patched-file syntax and crash signatures, then asks Gemini to review the patch and available related tests. It does not execute the client repository's test suite; run that suite in the client project's CI before merging the PR.
+
 ## Flow
 
 ```
 Client SDK  →  register GitHub + PR email
-Client SDK  →  POST /ingest/:key  →  SQLite group  →  live dashboard
+Client SDK  →  POST /ingest/:key  →  MongoDB issue/event collections  →  live dashboard
                                       ↓
                                new error/fatal
                                       ↓

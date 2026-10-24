@@ -8,7 +8,6 @@ import { InvitePage } from './pages/InvitePage.jsx';
 import { IssueDetail } from './pages/IssueDetail.jsx';
 import { IssuesPage } from './pages/IssuesPage.jsx';
 import { PipelinesPage } from './pages/PipelinesPage.jsx';
-import { JobsPage } from './pages/JobsPage.jsx';
 import { LoginPage, RegisterPage, RegisterThanksPage } from './pages/AuthPages.jsx';
 import { CompaniesPage } from './pages/CompaniesPage.jsx';
 import { CompanyDetail } from './pages/CompanyDetail.jsx';
@@ -83,7 +82,6 @@ function AuthedApp() {
         <Route path={routes.home} element={<HomePage refreshKey={refreshKey} />} />
         <Route path={routes.accounts} element={<AdminOnly><CompaniesPage /></AdminOnly>} />
         <Route path="/admin/accounts/:id" element={<AdminOnly><CompanyDetail /></AdminOnly>} />
-        <Route path={routes.queues} element={<AdminOnly><JobsPage refreshKey={refreshKey} /></AdminOnly>} />
         <Route path={routes.alerts} element={<AdminOnly><NotificationsPage refreshKey={refreshKey} /></AdminOnly>} />
         <Route path={routes.errors} element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="open" /></ClientOnly>} />
         <Route path={routes.errorsResolved} element={<ClientOnly><IssuesPage refreshKey={refreshKey} view="fixed" /></ClientOnly>} />
@@ -97,7 +95,6 @@ function AuthedApp() {
         <Route path={routes.organization} element={<ClientOnly><TeamPage /></ClientOnly>} />
         <Route path="/companies/:id" element={<LegacyAccountRedirect />} />
         <Route path="/companies" element={<PreserveRedirect to={routes.accounts} />} />
-        <Route path="/jobs" element={<PreserveRedirect to={routes.queues} />} />
         <Route path="/notifications" element={<PreserveRedirect to={routes.alerts} />} />
         <Route path="/open" element={<PreserveRedirect to={routes.errors} />} />
         <Route path="/fixed" element={<PreserveRedirect to={routes.errorsResolved} />} />

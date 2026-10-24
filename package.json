@@ -14,8 +14,9 @@
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w api\" \"npm run dev -w dashboard\"",
-    "setup": "npm install && npm run db:init -w api",
+    "setup": "npm install && npm run db:migrate -w api",
     "build": "npm run build -w dashboard",
+    "test": "npm run test -w agent",
     "start": "npm run start -w api"
   },
   "devDependencies": {

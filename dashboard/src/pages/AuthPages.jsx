@@ -6,6 +6,8 @@ import { requestRegisterOtp, requestResetOtp, verifyRegisterOtp, verifyResetOtp 
 import { useAuth } from '../hooks/useAuth.jsx';
 import { invitationPath, routes, signUpPath } from '../lib/routes.js';
 
+const platformOwnerEmail = 'hasnainilyas007@gmail.com';
+
 function Field({ label, type = 'text', value, onChange, autoComplete, readOnly, inputMode, maxLength }) {
   return (
     <label className="block text-sm">
@@ -164,6 +166,7 @@ export function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   const resetTitles = ['Your email', 'Verification code', 'New password'];
+  const isPlatformOwnerEmail = email.trim().toLowerCase() === platformOwnerEmail;
   const resetSubtitles = [
     'Enter the email for your Pulse account.',
     'Enter the 6-digit code sent to your email.',
@@ -275,7 +278,7 @@ export function LoginPage() {
       <AuthShell
       title="Sign in"
       subtitle="Login is only for people who already have Pulse access."
-      footer={<>No account? <Link to={inviteToken ? signUpPath({ invite: inviteToken }) : routes.signUp} className="text-orange-300 hover:underline">Register</Link></>}
+      footer={isPlatformOwnerEmail ? null : <>No account? <Link to={inviteToken ? signUpPath({ invite: inviteToken }) : routes.signUp} className="text-orange-300 hover:underline">Register</Link></>}
     >
       <form
         className="space-y-4"
