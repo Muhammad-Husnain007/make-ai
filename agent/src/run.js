@@ -133,6 +133,18 @@ export function canContinueToPr(test) {
 
 async function runFixTests({ issue, event, files, analysis, github, githubConfig, attempt }) {
   const checks = [];
+
+  if (github?.primaryFrame?.path) {
+    const touchesPrimary = (files || []).some((f) => f.path === github.primaryFrame.path);
+    if (!touchesPrimary) {
+      return {
+        ok: false,
+        reason: `Patch does not touch the failing file (${github.primaryFrame.path}). Unrelated edits were rejected.`,
+        checks,
+      };
+    }
+  }
+
   const syntaxFailures = syntaxCheckFiles(files);
   if (syntaxFailures.length) {
     return {
@@ -263,6 +275,7 @@ export async function testFix({ issue, event, files, analysis, github, githubCon
         repo: github.repoFull,
         base: github.base,
         secretFiles: github.secretFiles || [],
+        primaryFrame: github.primaryFrame || null,
       });
       const nextFix = await fixIssue({
         issue,
@@ -360,6 +373,7 @@ export async function scanIssue({ issue, event, project, logger, store }) {
             repo: github.repoFull,
             base: github.base,
             secretFiles,
+            primaryFrame: github.primaryFrame || null,
           })),
         };
         analysis = attachSecretGuidance(analysis, secretFiles, issue);
@@ -620,12 +634,31 @@ export async function runFixAgent({ issue, event, logger, io, force = false, pro
   });
 }
 
-export function shouldRunAgent(result) {
-  const level = result.event?.level || result.issue?.level;
+export function shouldRunAgent(result, project = null) {
+  const event = result?.event || {};
+  const issue = result?.issue || {};
+  const level = event.level || issue.level;
   if (!['error', 'fatal'].includes(level)) return false;
-  if (result.issue?.agent_status === 'running') return false;
-  const retryFailed = result.issue?.agent_status === 'failed';
-  if (!result.isNew && !result.reopened && !(retryFailed && !result.issue?.pr_url)) return false;
-  if (result.issue?.agent_status === 'done' && result.issue?.pr_url && !result.reopened) return false;
+
+  // 1. NEVER trace bugs locally!
+  const env = String(event.environment || issue.environment || '').toLowerCase();
+  if (['local', 'development', 'dev', 'test'].includes(env)) return false;
+
+  const url = String(event.url || '').toLowerCase();
+  if (url.includes('localhost') || url.includes('127.0.0.1')) return false;
+
+  if (event.extra?.isLocal === true || event.tags?.isLocal === 'true') return false;
+
+  // 2. Only trace bugs when code is on the main/base branch
+  const targetBranch = String(project?.github_base_branch || project?.githubBaseBranch || 'main').trim();
+  const eventBranch = String(event.branch || event.tags?.branch || '').trim();
+  if (eventBranch && targetBranch && eventBranch !== targetBranch) {
+    return false;
+  }
+
+  if (issue.agent_status === 'running') return false;
+  const retryFailed = issue.agent_status === 'failed';
+  if (!result.isNew && !result.reopened && !(retryFailed && !issue.pr_url)) return false;
+  if (issue.agent_status === 'done' && issue.pr_url && !result.reopened) return false;
   return true;
 }

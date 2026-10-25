@@ -25,7 +25,7 @@ export const Issue = model('PulseIssue', {
 }, [[{ project_id: 1, fingerprint: 1 }, { unique: true }], [{ project_id: 1, last_seen: -1 }, {}], [{ status: 1 }, {}]]);
 export const Event = model('PulseEvent', {
   id, issue_id: { type: String, index: true }, project_id: { type: String, index: true }, timestamp: { type: String, index: true },
-  level: String, message: String, type: String, stack: String, url: String, environment: String, release_name: String,
+  level: String, message: String, type: String, stack: String, url: String, environment: String, release_name: String, branch: { type: String, default: '' },
   user: { type: Schema.Types.Mixed, default: {} }, tags: { type: Schema.Types.Mixed, default: {} },
   breadcrumbs: { type: [Schema.Types.Mixed], default: [] }, extra: { type: Schema.Types.Mixed, default: {} }, sdk: String,
 }, [[{ issue_id: 1, timestamp: -1 }, {}], [{ project_id: 1, timestamp: -1 }, {}]]);

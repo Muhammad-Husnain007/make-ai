@@ -8,6 +8,7 @@ const ingestSchema = z.object({
   type: z.string().max(120).optional(), message: z.string().min(1).max(4000), stack: z.string().max(20_000).optional(),
   level: z.enum(['fatal', 'error', 'warning', 'info', 'debug']).optional(), timestamp: z.string().datetime().optional(),
   url: z.string().max(2048).optional(), environment: z.string().max(40).optional(), release: z.string().max(80).optional(),
+  branch: z.string().max(120).optional(),
   user: z.record(z.any()).optional(), tags: z.record(z.union([z.string(), z.number(), z.boolean()])).optional(),
   breadcrumbs: z.array(z.record(z.any())).max(50).optional(), extra: z.record(z.any()).optional(), sdk: z.string().max(80).optional(),
 });
@@ -278,7 +279,8 @@ export async function ingestEvent(publicKey, rawBody) {
     if (reopened) update.$set.status = 'open';
     issue = await Issue.findOneAndUpdate({ id: issue.id }, update, { new: true }).lean();
   }
-  const event = { id: nanoid(), issue_id: issue.id, project_id: project.id, timestamp: seen, level, message: body.message, type, stack: body.stack || '', url: body.url || '', environment: body.environment || 'production', release_name: body.release || '', user, tags: body.tags || {}, breadcrumbs: body.breadcrumbs || [], extra: stripPasswordFields(body.extra || {}), sdk: body.sdk || '@pulse/sdk' };
+  const branch = body.branch || body.tags?.branch || '';
+  const event = { id: nanoid(), issue_id: issue.id, project_id: project.id, timestamp: seen, level, message: body.message, type, stack: body.stack || '', url: body.url || '', environment: body.environment || 'production', release_name: body.release || '', branch, user, tags: { ...body.tags, ...(branch ? { branch } : {}) }, breadcrumbs: body.breadcrumbs || [], extra: stripPasswordFields(body.extra || {}), sdk: body.sdk || '@pulse/sdk' };
   await Event.create(event);
   const userCount = await distinctUserCount(issue.id);
   await Issue.updateOne({ id: issue.id }, { $set: { user_count: userCount } });

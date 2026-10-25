@@ -1,3 +1,6 @@
+import fs from 'node:fs';
+import path from 'node:path';
+
 const MAX_BREADCRUMBS = 40;
 const MAX_QUEUE = 30;
 
@@ -30,6 +33,42 @@ function browserAnonymousId() {
   }
 }
 
+function detectGitBranch() {
+  if (typeof process === 'undefined') return '';
+  if (process.env.GITHUB_REF_NAME) return process.env.GITHUB_REF_NAME;
+  if (process.env.GITHUB_REF) return process.env.GITHUB_REF.replace(/^refs\/heads\//, '');
+  if (process.env.GIT_BRANCH) return process.env.GIT_BRANCH;
+  if (process.env.BRANCH) return process.env.BRANCH;
+  try {
+    const headFile = path.join(process.cwd(), '.git', 'HEAD');
+    if (fs.existsSync(headFile)) {
+      const head = fs.readFileSync(headFile, 'utf8').trim();
+      const match = head.match(/ref:\s*refs\/heads\/(.+)/);
+      if (match) return match[1].trim();
+    }
+  } catch {
+    // Non-fatal if .git cannot be read
+  }
+  return '';
+}
+
+function detectIsLocal() {
+  if (typeof process === 'undefined') {
+    if (typeof location !== 'undefined') {
+      return location.hostname === 'localhost' || location.hostname === '127.0.0.1';
+    }
+    return false;
+  }
+  const nodeEnv = String(process.env.NODE_ENV || '').toLowerCase();
+  const pulseEnv = String(process.env.PULSE_ENVIRONMENT || '').toLowerCase();
+  if (['local', 'development', 'dev', 'test'].includes(pulseEnv)) return true;
+  if (['local', 'development', 'dev', 'test'].includes(nodeEnv)) return true;
+  if (!process.env.CI && !process.env.VERCEL && !process.env.RENDER && !process.env.HEROKU && !process.env.AWS_EXECUTION_ENV) {
+    if (nodeEnv !== 'production' && pulseEnv !== 'production') return true;
+  }
+  return false;
+}
+
 function normalizeUser(user) {
   const raw = user && typeof user === 'object' ? user : {};
   const id = String(raw.id || raw._id || '').trim();
@@ -49,12 +88,20 @@ function safeJson(value) {
 }
 
 export function createPulseClient(options = {}) {
+  const isLocalInitial = options.isLocal ?? detectIsLocal();
+  const branchInitial = options.branch || detectGitBranch();
   const state = {
     dsn: options.dsn || '',
-    environment: options.environment || 'production',
+    environment: options.environment || (isLocalInitial ? 'local' : 'production'),
     release: options.release || '',
+    branch: branchInitial,
+    isLocal: isLocalInitial,
     user: options.user || {},
-    tags: options.tags || {},
+    tags: {
+      ...(options.tags || {}),
+      ...(branchInitial ? { branch: branchInitial } : {}),
+      isLocal: isLocalInitial ? 'true' : 'false',
+    },
     breadcrumbs: [],
     queue: [],
     sending: false,
@@ -116,10 +163,16 @@ export function createPulseClient(options = {}) {
       url: typeof location !== 'undefined' ? location.href : extra.url || '',
       environment: state.environment,
       release: state.release,
+      branch: state.branch || '',
       user: normalizeUser(extra.user || state.user),
-      tags: { ...state.tags, ...(extra.tags || {}) },
+      tags: {
+        ...state.tags,
+        ...(state.branch ? { branch: state.branch } : {}),
+        isLocal: state.isLocal ? 'true' : 'false',
+        ...(extra.tags || {}),
+      },
       breadcrumbs: [...state.breadcrumbs],
-      extra: safeJson(extra.extra) || {},
+      extra: safeJson({ ...(extra.extra || {}), isLocal: state.isLocal }),
       sdk: '@pulse/sdk@1.0.0',
     };
     addBreadcrumb({ type: 'error', category: 'exception', message: event.message, level: 'error' });
@@ -174,7 +227,7 @@ export function createPulseClient(options = {}) {
       captureException(error, {
         level: 'fatal',
         url: String(process.argv?.[1] || ''),
-        extra: { ...context, cwd: process.cwd(), main: String(process.argv?.[1] || '') },
+        extra: { ...context, cwd: process.cwd(), main: String(process.argv?.[1] || ''), isLocal: state.isLocal },
       });
       const forceExit = setTimeout(() => process.exit(1), 3000);
       const drain = async () => {
@@ -223,12 +276,27 @@ export function createPulseClient(options = {}) {
 
   return {
     init(next = {}) {
+      const isLocal = next.isLocal ?? (options.isLocal ?? detectIsLocal());
+      const branch = next.branch || process.env.PULSE_BRANCH || detectGitBranch() || state.branch;
+      const defaultEnv = isLocal ? 'local' : 'production';
+      const environment = next.environment
+        || process.env.PULSE_ENVIRONMENT
+        || process.env.NODE_ENV
+        || defaultEnv;
+
       const dsn = next.dsn || process.env.PULSE_DSN || state.dsn;
       Object.assign(state, next, {
         dsn,
-        environment: next.environment || process.env.PULSE_ENVIRONMENT || process.env.NODE_ENV || state.environment,
+        environment,
         release: next.release || process.env.PULSE_RELEASE || state.release,
+        branch,
+        isLocal,
       });
+      state.tags = {
+        ...state.tags,
+        ...(state.branch ? { branch: state.branch } : {}),
+        isLocal: state.isLocal ? 'true' : 'false',
+      };
       install();
       registerClientSettings();
       return this;
@@ -253,7 +321,6 @@ export const captureException = (...args) => defaultClient.captureException(...a
 export const captureMessage = (...args) => defaultClient.captureMessage(...args);
 export const setUser = (...args) => defaultClient.setUser(...args);
 export const setTag = (...args) => defaultClient.setTag(...args);
-export const addBreadcrumb = (...args) => defaultClient.addBreadcrumb(...args);
 export const flush = () => defaultClient.flush();
 
 if (typeof window !== 'undefined') {

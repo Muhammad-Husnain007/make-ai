@@ -48,6 +48,9 @@ export function remainingCrashSignatures(issue, files) {
   const hits = [];
   const method = title.match(/TypeError:\s+([A-Za-z_$][\w$]*)\.([A-Za-z_$][\w$]*) is not a function/);
   const ref = title.match(/ReferenceError:\s+([A-Za-z_$][\w$]*) is not defined/);
+  const undefProp = title.match(/Cannot read properties of undefined \(reading ['"]([^'"]+)['"]\)/i)
+    || title.match(/Cannot read property ['"]([^'"]+)['"] of undefined/i);
+
   for (const file of files || []) {
     const source = file.githubContents || file.contents || '';
     if (method && source.includes(`${method[1]}.${method[2]}`)) {
@@ -58,6 +61,13 @@ export function remainingCrashSignatures(issue, files) {
     }
     if (ref && new RegExp(`\\b${ref[1]}\\s*(?:is not defined)`).test(source)) {
       hits.push(`${file.path} still mentions ${ref[1]} is not defined`);
+    }
+    // Check for off-by-one loop limit pattern (i <= items.length vs i < items.length)
+    if (undefProp && /\b([a-zA-Z_$][\w$]*)\.length\b/.test(source)) {
+      const loopMatch = source.match(/for\s*\([^;]+;\s*([a-zA-Z_$][\w$]*)\s*<=\s*([a-zA-Z_$][\w$]*)\.length/);
+      if (loopMatch) {
+        hits.push(`${file.path} still contains off-by-one loop boundary (${loopMatch[1]} <= ${loopMatch[2]}.length)`);
+      }
     }
   }
   return hits;

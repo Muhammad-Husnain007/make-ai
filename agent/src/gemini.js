@@ -95,7 +95,7 @@ async function generateJson(prompt) {
   throw lastError;
 }
 
-export async function analyzeWithGemini({ issue, event, contextFiles, repo, base, secretFiles = [] }) {
+export async function analyzeWithGemini({ issue, event, contextFiles, repo, base, secretFiles = [], primaryFrame = null }) {
   const safeFiles = (contextFiles || [])
     .map((file) => maskContextFile(file))
     .filter((file) => file && !isSecretPath(file.path));
@@ -107,40 +107,52 @@ export async function analyzeWithGemini({ issue, event, contextFiles, repo, base
     path: file.path,
     contents: file.contents,
   }));
-  const prompt = `You are Pulse. Fix this production crash with a GitHub PR against \`${repo}\` branch \`${base}\`.
-The source files below were fetched from the configured GitHub repository. Trace the stack from the first application frame through the matched files, compare adjacent frames to identify the failing call path, and use the reported line/column to inspect the relevant code. Do not infer source from a local checkout or assume local files are available.
 
-Return ONLY JSON:
+  const primaryGuidance = primaryFrame && primaryFrame.path
+    ? `\nCRITICAL FOCUS: The crash originated directly in \`${primaryFrame.path}\`${primaryFrame.line ? ` at line ${primaryFrame.line}` : ''}${primaryFrame.col ? `:${primaryFrame.col}` : ''}.
+You MUST apply the fix to \`${primaryFrame.path}\`. Do NOT edit other files unless strictly necessary for imports.`
+    : '';
+
+  const prompt = `You are Pulse, an automated production bug-fixing agent. Fix this crash with an accurate, minimal surgical patch against \`${repo}\` branch \`${base}\`.
+${primaryGuidance}
+
+Return ONLY valid JSON (no markdown fences, no explanatory text outside JSON):
 {
-  "summary": "one paragraph",
-  "rootCause": "syntax error or logical bug",
-  "solution": "what changed in the source files",
-  "prBody": "markdown for the source-file PR",
+  "summary": "Concise summary of the bug and fix.",
+  "rootCause": "Exact root cause of the error.",
+  "solution": "Clear description of the exact change made.",
+  "prBody": "Markdown description for the GitHub Pull Request.",
   "secretGuidance": [{ "path": "secret filename only", "issue": "what is wrong", "action": "what the client must change locally" }],
   "files": [{
     "path": "exact/path/from/the-list.js",
-    "edits": [{ "old": "exact text copied from contents", "new": "that text with the bug fixed" }]
+    "edits": [{ "old": "exact verbatim text from contents", "new": "minimal corrected text" }]
   }]
 }
 
-Rules:
-- Handle syntax errors AND logical bugs, including complex fixes that need many edits or larger changes in these files.
-- Trace the failure across all supplied stack-matched files before choosing a root cause; explain how the failing frame leads to the bug.
-- Only edit: ${JSON.stringify(allowedPaths)}
-- Do not invent other files or ask for the rest of the repo.
-- "old" must be copied from contents, including spaces.
-- Leave every __PULSE_REDACTED_N__ token unchanged. Never output passwords, API keys, private keys, tokens, or connection secrets.
-- Do not reformat unrelated code.
-- After your edits the original crash must be gone from these files. Pulse will syntax-check the patch and refuse a PR if tests fail.
-${secretNames.length ? `- This crash also involves secret files (names only, contents never provided): ${JSON.stringify(secretNames)}
-- Put secret-file instructions in secretGuidance only. Do not add those files to "files". Do not invent secret values or example credentials.` : '- secretGuidance must be an empty array.'}
+STRICT RULES FOR ACCURACY AND SURGICAL FIXES:
+1. SURGICAL FIX ONLY — DO NOT CHANGE EXTRA CODE:
+   - Make ONLY the minimal, necessary changes to fix this specific crash.
+   - Do NOT rewrite or refactor surrounding functions.
+   - Do NOT reformat code or alter whitespace/indentation outside the exact bug fix.
+   - Do NOT rename unrelated variables or add unrequested features.
+   - Only edit files from: ${JSON.stringify(allowedPaths)}
+2. VERBATIM MATCHING:
+   - "old" MUST be an exact verbatim substring present in the provided file contents, including exact spaces and punctuation.
+3. ACCURACY REQUIREMENTS:
+   - For SyntaxError (e.g., missing parenthesis like apiRouter.use'(...)' instead of apiRouter.use('...'), missing comma, bad token): fix the exact syntax typo.
+   - For TypeError / Cannot read properties of undefined / off-by-one errors (e.g. loop index <= items.length instead of < items.length): fix the exact boundary condition or guard the property access cleanly.
+   - For ReferenceError: fix the name or import.
+4. VALID JAVASCRIPT:
+   - The resulting code must be 100% syntactically valid JavaScript.
+   - Leave every __PULSE_REDACTED_N__ token unchanged. Never output real or fake credentials.
+${secretNames.length ? `- Secret files involved: ${JSON.stringify(secretNames)}. Put local instructions in secretGuidance only.` : '- secretGuidance must be an empty array.'}
 
 Issue: ${payload.title}
 Culprit: ${payload.culprit || 'n/a'}
-Stack:
+Stack Trace:
 ${payload.stack}
 
-Files:
+Source Files:
 ${JSON.stringify(files)}`;
 
   return sanitizeAnalysis(await generateJson(prompt));

@@ -543,14 +543,15 @@ app.post('/ingest/:projectKey', {
       event: result.event,
       projectId: result.project.id,
     });
-    if (shouldRunAgent(result)) {
+    const willRun = shouldRunAgent(result, result.project);
+    if (willRun) {
       startAgent(result.issue, result.event, Boolean(result.reopened), result.project).catch((error) => app.log.error({ err: error }, 'Pulse AI agent failed to start'));
     }
     return reply.code(202).send({
       ok: true,
       id: result.event.id,
       issueId: result.issue.id,
-      agentStarted: shouldRunAgent(result),
+      agentStarted: willRun,
     });
   } catch (error) {
     const status = error.statusCode || 500;

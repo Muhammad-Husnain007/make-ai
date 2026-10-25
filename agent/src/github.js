@@ -89,17 +89,70 @@ export async function resolveGithubRepo(github = {}) {
   return value;
 }
 
-export function extractStackPaths(stack, culprit = '') {
+export function parseStackFrames(stack, culprit = '') {
   const text = `${stack || ''}\n${culprit || ''}`;
-  const matches = text.match(/(?:file:\/\/\/)?(?:[A-Za-z]:)?[^\s)'"]+\.(?:js|jsx|ts|tsx|mjs|cjs)/gi) || [];
-  return [...new Set(matches.map((item) => item
-    .replace(/^file:\/\//i, '')
-    .replace(/^[('"`[]+/, '')
-    .replace(/\\/g, '/')
-    .replace(/^\/+/, '')
-    .replace(/^[A-Za-z]:/, '')
-    .replace(/^\/+/, '')
-    .replace(/:\d+:\d+$/, '')))];
+  const lines = text.split(/\r?\n/);
+  const frames = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    // Pattern 1: at ... (path:line:col) or at path:line:col
+    const atMatch = line.match(/^at (?:async )?(?:.*?\()?((?:file:\/\/\/)?(?:[A-Za-z]:)?[^:()\r\n]+\.(?:js|jsx|ts|tsx|mjs|cjs)):(\d+)(?::(\d+))?\)?/i);
+    if (atMatch) {
+      frames.push({
+        rawPath: atMatch[1],
+        line: Number(atMatch[2]),
+        col: Number(atMatch[3] || 1),
+      });
+      continue;
+    }
+
+    // Pattern 2: direct path:line[:col] (SyntaxError header)
+    const directMatch = line.match(/^((?:file:\/\/\/)?(?:[A-Za-z]:)?[^:()\r\n]+\.(?:js|jsx|ts|tsx|mjs|cjs)):(\d+)(?::(\d+))?/i);
+    if (directMatch) {
+      frames.push({
+        rawPath: directMatch[1],
+        line: Number(directMatch[2]),
+        col: Number(directMatch[3] || 1),
+      });
+    }
+  }
+
+  if (!frames.length) {
+    const matches = text.match(/(?:file:\/\/\/)?(?:[A-Za-z]:)?[^:()\r\n\s'"`]+\.(?:js|jsx|ts|tsx|mjs|cjs)/gi) || [];
+    for (const m of matches) {
+      frames.push({ rawPath: m, line: 0, col: 0 });
+    }
+  }
+
+  const cleaned = [];
+  for (const f of frames) {
+    const p = f.rawPath
+      .replace(/^file:\/\//i, '')
+      .replace(/^[('"`[]+/, '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '')
+      .replace(/^[A-Za-z]:/, '')
+      .replace(/^\/+/, '').replace(/\/+/g, '/');
+
+    if (p.startsWith('node:') || p.includes('internal/modules/') || p.includes('/node:')) continue;
+    if (p.includes('node_modules/')) continue;
+
+    cleaned.push({
+      path: p,
+      line: f.line,
+      col: f.col,
+    });
+  }
+
+  return cleaned;
+}
+
+export function extractStackPaths(stack, culprit = '') {
+  const frames = parseStackFrames(stack, culprit);
+  return [...new Set(frames.map((f) => f.path))];
 }
 
 function scoreRepoPath(hint, repoPath) {
@@ -167,18 +220,27 @@ async function readGithubFile(target, path, sha) {
 }
 
 export async function gatherGithubContext({ stack, culprit, release, extra, url, github } = {}) {
-  const extraText = [culprit, url, extra?.main, extra?.cwd].filter(Boolean).join('\n');
+  const extraText = [culprit, url, extra?.cwd].filter(Boolean).join('\n');
   const secretFiles = extractSecretStackPaths(stack, extraText);
   const target = await resolveGithubRepo(github);
   if (!target.ok) return { ...target, files: [], secretFiles };
   const tree = await listSourceFiles(target);
   const byPath = new Map(tree.map((item) => [item.path, item]));
-  const hints = extractStackPaths(stack, extraText)
-    .filter((hint) => !hint.startsWith('node:') && !hint.includes('internal/modules/') && !hint.includes('/node:'));
+
+  const frames = parseStackFrames(stack, culprit);
+  let hints = [...new Set(frames.map((f) => f.path))];
+
+  if (!hints.length && extraText) {
+    hints = extractStackPaths(extraText);
+  }
+
   const shopScoped = hints.some((hint) => /shop-api/i.test(hint))
     || /shop-api/i.test(String(release || ''))
     || /shop-api/i.test(String(extra?.cwd || ''));
+
   const matched = [];
+  let primaryFrame = null;
+
   for (const hint of hints) {
     if (isSecretPath(hint) || isSecretPath(hint.split('/').pop() || '')) {
       const label = publicSecretLabel(hint);
@@ -195,9 +257,20 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
       if (label && !secretFiles.includes(label)) secretFiles.push(label);
       continue;
     }
-    if (hit && !matched.includes(hit.path) && !isSecretPath(hit.path)) matched.push(hit.path);
+    if (hit && !matched.includes(hit.path) && !isSecretPath(hit.path)) {
+      matched.push(hit.path);
+      if (!primaryFrame) {
+        const frame = frames.find((f) => f.path === hint);
+        primaryFrame = {
+          path: hit.path,
+          line: frame?.line || 0,
+          col: frame?.col || 0,
+        };
+      }
+    }
     if (matched.length >= 8) break;
   }
+
   const files = (await Promise.all(matched.map(async (filePath) => {
     const contents = await readGithubFile(target, filePath, byPath.get(filePath)?.sha);
     if (!contents || isSecretPath(filePath) || /-----BEGIN (?:RSA |EC |DSA |OPENSSH |ENCRYPTED )?PRIVATE KEY-----/.test(contents)) return null;
@@ -209,12 +282,13 @@ export async function gatherGithubContext({ stack, culprit, release, extra, url,
       baseSha: target.baseSha,
     };
   }))).filter(Boolean);
+
   const unmatchedReason = files.length || secretFiles.length
     ? ''
     : (!hints.length && !secretFiles.length
       ? 'This stack has no client file paths — only Node internals — so Pulse cannot open a PR against the GitHub repo.'
       : `This stack points at ${hints.join(', ')}, which are not files in ${target.repoFull}.`);
-  return { ...target, files, secretFiles, unmatchedReason };
+  return { ...target, files, secretFiles, primaryFrame, unmatchedReason };
 }
 
 export async function loadRelatedTestFiles(github, patchedPaths = []) {
